@@ -1,0 +1,20 @@
+# Dataset and model files
+data/
+checkpoints/
+*.pth
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# MLflow
+mlruns/
+
+# AWS
+.aws/
