@@ -1,5 +1,5 @@
 "use client"
-import { saveMeal } from "@/lib/meals"
+
 import { useState, useRef, useEffect } from "react"
 import { Loader2, RotateCcw, AlertCircle, LogOut } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -11,7 +11,14 @@ import { RecentScans } from "@/components/nutriscan/recent-scans"
 import { BottomNav, type Tab } from "@/components/nutriscan/bottom-nav"
 import { MacroDonut } from "@/components/nutriscan/macro-donut"
 import { Button } from "@/components/ui/button"
+import { CoachChat } from "@/components/nutriscan/coach-chat"
+import { WaterTracker } from "@/components/nutriscan/water-tracker"
+import { WeeklyChart } from "@/components/nutriscan/weekly-chart"
+import { StreakBadge } from "@/components/nutriscan/streak-badge"
+import { GoalSetter } from "@/components/nutriscan/goal-setter"
+import { MenuScanner } from "@/components/nutriscan/menu-scanner"
 import { scanFood } from "@/lib/api"
+import { saveMeal } from "@/lib/meals"
 import { useStore, getCurrentMeal } from "@/lib/store"
 import { useAuth } from "@/lib/auth"
 import type { ScanResult } from "@/lib/nutriscan-data"
@@ -22,7 +29,6 @@ export default function Page() {
   const { user, loading, logout } = useAuth()
   const router = useRouter()
 
-  // Redirect to auth if not logged in
   useEffect(() => {
     if (!loading && !user) router.push("/auth")
   }, [user, loading, router])
@@ -34,7 +40,6 @@ export default function Page() {
   )
 
   if (!user) return null
-
   return <AppShell user={user} onLogout={logout} />
 }
 
@@ -45,20 +50,29 @@ function AppShell({
   user: { displayName?: string | null; email?: string | null; uid: string }
   onLogout: () => Promise<void>
 }) {
-  const [tab, setTab] = useState<Tab>("home")
+  const [tab, setTab]             = useState<Tab>("home")
   const [scanState, setScanState] = useState<ScanState>("idle")
-  const [result, setResult] = useState<ScanResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const { logMeal, totalCalories, dailyGoal, loadMeals } = useStore()
-  useEffect(() => {
-    loadMeals(user.uid)
-  }, [user.uid])
+  const [result, setResult]       = useState<ScanResult | null>(null)
+  const [error, setError]         = useState<string | null>(null)
+  const fileInputRef              = useRef<HTMLInputElement>(null)
 
+  const {
+    logMeal, totalCalories, totalProtein,
+    profile, loadMeals, loadProfile, loadWeekly, loadWater
+  } = useStore()
 
-  // Display name — use Firebase displayName or fallback to email prefix
   const displayName = user.displayName ?? user.email?.split("@")[0] ?? "User"
-  const initials = displayName.slice(0, 2).toUpperCase()
+  const initials    = displayName.slice(0, 2).toUpperCase()
+
+  // Load all user data on mount
+  useEffect(() => {
+    if (user.uid) {
+      loadProfile(user.uid)
+      loadMeals(user.uid)
+      loadWeekly(user.uid)
+      loadWater(user.uid)
+    }
+  }, [user.uid])
 
   async function handleFile(file: File) {
     setScanState("scanning")
@@ -74,23 +88,22 @@ function AppShell({
 
       setResult(data)
       setScanState("done")
-      logMeal(data, getCurrentMeal())
+      const meal = getCurrentMeal()
+      logMeal(data, meal)
 
       // Save to Firestore
-      if (user) {
-        saveMeal(user.uid, {
-          name: data.name,
-          calories: data.calories,
-          protein: data.macros.protein,
-          carbs: data.macros.carbs,
-          fat: data.macros.fat,
-          meal: getCurrentMeal(),
-          weightGrams: data.weightGrams ?? null,
-          serving: data.serving ?? null,
-          source: data.source ?? "efficientnet",
-          imageUrl: null,
-        })
-      }
+      saveMeal(user.uid, {
+        name        : data.name,
+        calories    : data.calories,
+        protein     : data.macros.protein,
+        carbs       : data.macros.carbs,
+        fat         : data.macros.fat,
+        meal,
+        weightGrams : data.weightGrams ?? null,
+        serving     : data.serving ?? null,
+        source      : data.source ?? "efficientnet",
+        imageUrl    : null,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
       setScanState("error")
@@ -112,14 +125,15 @@ function AppShell({
     new Date().getHours() < 12
       ? "Good morning"
       : new Date().getHours() < 17
-        ? "Good afternoon"
-        : "Good evening"
+      ? "Good afternoon"
+      : "Good evening"
 
   return (
     <div className="mx-auto min-h-dvh max-w-md bg-background pb-24">
       <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/90 px-5 py-4 backdrop-blur">
         <Logo />
         <div className="flex items-center gap-2">
+          <StreakBadge />
           <button
             onClick={onLogout}
             className="flex size-9 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
@@ -160,6 +174,7 @@ function AppShell({
               onReset={reset}
             />
             <CalorieTracker />
+            <WaterTracker uid={user.uid}/>
             <RecentScans />
           </>
         )}
@@ -174,6 +189,7 @@ function AppShell({
               onFileSelect={() => fileInputRef.current?.click()}
               onReset={reset}
             />
+            <MenuScanner />
           </>
         )}
 
@@ -181,6 +197,7 @@ function AppShell({
           <>
             <h1 className="text-2xl font-bold text-foreground">Your stats</h1>
             <CalorieTracker />
+            <WeeklyChart />
             {result && (
               <div className="rounded-3xl border border-border bg-card p-5">
                 <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -203,11 +220,11 @@ function AppShell({
               <div>
                 <p className="text-lg font-semibold text-foreground">{displayName}</p>
                 <p className="text-sm text-muted-foreground">{user.email}</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Goal: {dailyGoal} kcal / day
+                <p className="mt-1 text-sm text-muted-foreground capitalize">
+                  Goal: {profile.fitnessGoal}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Today: {totalCalories} kcal consumed
+                  {totalCalories} / {profile.dailyGoal} kcal today
                 </p>
               </div>
               <Button
@@ -219,8 +236,8 @@ function AppShell({
                 Sign out
               </Button>
             </div>
-            <CalorieTracker />
-            <RecentScans />
+            <GoalSetter uid={user.uid} />
+            <CoachChat userName={displayName} />
           </>
         )}
       </main>
