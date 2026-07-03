@@ -98,13 +98,13 @@ export async function fetchUserProfile(uid: string): Promise<Partial<UserProfile
 
 // ── Save water intake ─────────────────────────────────────────────────────
 export async function saveWaterIntake(userId: string, ml: number): Promise<void> {
-  const today = new Date().toISOString().split("T")[0] // "2026-07-02"
+  const today = new Date().toLocaleDateString("en-CA")// "2026-07-02"
   await setDoc(doc(db, "water", `${userId}_${today}`), { ml, userId, date: today }, { merge: true })
 }
 
 // ── Fetch today's water intake ────────────────────────────────────────────
 export async function fetchWaterIntake(userId: string): Promise<number> {
-  const today = new Date().toISOString().split("T")[0]
+  const today = new Date().toLocaleDateString("en-CA")
   const snap  = await getDoc(doc(db, "water", `${userId}_${today}`))
   if (!snap.exists()) return 0
   return snap.data().ml ?? 0
