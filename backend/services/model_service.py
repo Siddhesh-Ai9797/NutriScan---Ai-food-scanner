@@ -10,7 +10,7 @@ CHECKPOINT_PATH = "./checkpoints/best_model.pth"
 IMG_SIZE        = 300
 NUM_CLASSES     = 101
 DEVICE          = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-CONFIDENCE_THRESHOLD = 0.60   # below this → OOD detected
+CONFIDENCE_THRESHOLD = 0.85   # below this → OOD detected
 
 # ── Image preprocessing ───────────────────────────────────────────────────
 preprocess = transforms.Compose([
