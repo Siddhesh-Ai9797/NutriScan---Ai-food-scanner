@@ -42,6 +42,7 @@ class FoodClassifier:
         model.load_state_dict(checkpoint["model_state"])
         model.eval()
         model.to(DEVICE)
+        torch.set_num_threads(2)
 
         self.model   = model
         self.classes = checkpoint["classes"]
