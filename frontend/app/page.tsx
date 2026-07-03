@@ -50,11 +50,11 @@ function AppShell({
   user: { displayName?: string | null; email?: string | null; uid: string }
   onLogout: () => Promise<void>
 }) {
-  const [tab, setTab]             = useState<Tab>("home")
+  const [tab, setTab] = useState<Tab>("home")
   const [scanState, setScanState] = useState<ScanState>("idle")
-  const [result, setResult]       = useState<ScanResult | null>(null)
-  const [error, setError]         = useState<string | null>(null)
-  const fileInputRef              = useRef<HTMLInputElement>(null)
+  const [result, setResult] = useState<ScanResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const {
     logMeal, totalCalories, totalProtein,
@@ -62,7 +62,7 @@ function AppShell({
   } = useStore()
 
   const displayName = user.displayName ?? user.email?.split("@")[0] ?? "User"
-  const initials    = displayName.slice(0, 2).toUpperCase()
+  const initials = displayName.slice(0, 2).toUpperCase()
 
   // Load all user data on mount
   useEffect(() => {
@@ -93,16 +93,16 @@ function AppShell({
 
       // Save to Firestore
       saveMeal(user.uid, {
-        name        : data.name,
-        calories    : data.calories,
-        protein     : data.macros.protein,
-        carbs       : data.macros.carbs,
-        fat         : data.macros.fat,
+        name: data.name,
+        calories: data.calories,
+        protein: data.macros.protein,
+        carbs: data.macros.carbs,
+        fat: data.macros.fat,
         meal,
-        weightGrams : data.weightGrams ?? null,
-        serving     : data.serving ?? null,
-        source      : data.source ?? "efficientnet",
-        imageUrl    : data.imageUrl ?? null,
+        weightGrams: data.weightGrams ?? null,
+        serving: data.serving ?? null,
+        source: data.source ?? "efficientnet",
+        imageUrl: data.imageUrl ?? null,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
@@ -125,8 +125,8 @@ function AppShell({
     new Date().getHours() < 12
       ? "Good morning"
       : new Date().getHours() < 17
-      ? "Good afternoon"
-      : "Good evening"
+        ? "Good afternoon"
+        : "Good evening"
 
   return (
     <div className="mx-auto min-h-dvh max-w-md bg-background pb-24">
@@ -151,6 +151,7 @@ function AppShell({
         ref={fileInputRef}
         type="file"
         accept="image/*"
+        capture={undefined}
         className="sr-only"
         onChange={(e) => {
           const file = e.target.files?.[0]
@@ -174,7 +175,7 @@ function AppShell({
               onReset={reset}
             />
             <CalorieTracker />
-            <WaterTracker uid={user.uid}/>
+            <WaterTracker uid={user.uid} />
             <RecentScans />
           </>
         )}

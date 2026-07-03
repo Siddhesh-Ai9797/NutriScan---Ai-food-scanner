@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useState, useCallback } from "react"
 import { Camera, ImageUp, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 export function UploadZone({ onScan }: { onScan: () => void }) {
   const [dragging, setDragging] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -31,13 +30,6 @@ export function UploadZone({ onScan }: { onScan: () => void }) {
         dragging && "border-primary bg-accent",
       )}
     >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        onChange={() => onScan()}
-      />
       <span className="flex size-14 items-center justify-center rounded-2xl bg-accent text-primary">
         <ImageUp className="size-7" aria-hidden="true" />
       </span>
@@ -57,7 +49,7 @@ export function UploadZone({ onScan }: { onScan: () => void }) {
         </Button>
         <Button
           variant="outline"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => onScan()}
           className="h-11 rounded-full px-6 text-sm font-semibold"
         >
           <ImageUp className="size-4" aria-hidden="true" />
