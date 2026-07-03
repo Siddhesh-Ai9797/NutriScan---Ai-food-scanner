@@ -2,6 +2,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from services.model_service import classifier
 from services.nutrition_service import get_nutrition
 from services.ood_service import gpt4o_identify, estimate_portion
+from services.s3_service import upload_food_photo
 
 router = APIRouter()
 
@@ -10,14 +11,7 @@ router = APIRouter()
 async def predict(file: UploadFile = File(...)):
     """
     Main prediction endpoint.
-    Upload a food photo → get back food name + calories + macros.
-
-    Flow:
-        1. Read image bytes
-        2. EfficientNet classifies → confidence score
-        3. Confidence ≥ 60% → USDA nutrition + GPT-4o portion estimate
-        4. Confidence < 60% → GPT-4o Vision handles everything
-        5. Return unified response with real portion-scaled macros
+    Upload a food photo → get back food name + calories + macros + S3 image URL.
     """
 
     # ── Validate file type ────────────────────────────────────────────────
@@ -43,14 +37,21 @@ async def predict(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Model inference failed: {str(e)}")
 
-    # ── Step 2: Known food → USDA + GPT-4o portion estimate ──────────────
-    if not is_ood:
-        # Run both calls
-        nutrition     = await get_nutrition(food_label)
-        weight_grams  = await estimate_portion(image_bytes, food_label)
+    # ── Step 2: Upload photo to S3 ────────────────────────────────────────
+    try:
+        image_url = upload_food_photo(
+            image_bytes  = image_bytes,
+            food_label   = food_label if not is_ood else "unknown",
+            content_type = file.content_type or "image/jpeg",
+        )
+    except Exception:
+        image_url = None   # don't fail prediction if S3 upload fails
 
-        # Scale per-100g macros to actual portion size
-        scale = weight_grams / 100
+    # ── Step 3: Known food → USDA + GPT-4o portion estimate ──────────────
+    if not is_ood:
+        nutrition    = await get_nutrition(food_label)
+        weight_grams = await estimate_portion(image_bytes, food_label)
+        scale        = weight_grams / 100
 
         return {
             "status"      : "success",
@@ -65,9 +66,10 @@ async def predict(file: UploadFile = File(...)):
             "serving"     : f"estimated portion ({weight_grams}g)",
             "top5"        : top5,
             "is_ood"      : False,
+            "image_url"   : image_url,
         }
 
-    # ── Step 3: Unknown food → GPT-4o handles everything ─────────────────
+    # ── Step 4: Unknown food → GPT-4o Vision fallback ────────────────────
     gpt_result = await gpt4o_identify(image_bytes)
 
     if gpt_result.get("source") == "unknown":
@@ -83,6 +85,7 @@ async def predict(file: UploadFile = File(...)):
             "serving"   : None,
             "top5"      : top5,
             "is_ood"    : True,
+            "image_url" : image_url,
             "message"   : "Could not identify this food. Please describe it manually.",
         }
 
@@ -99,5 +102,6 @@ async def predict(file: UploadFile = File(...)):
         "serving"     : gpt_result.get("serving"),
         "top5"        : top5,
         "is_ood"      : True,
+        "image_url"   : image_url,
         "message"     : "Identified by AI — please confirm the dish name below to help us improve.",
     }

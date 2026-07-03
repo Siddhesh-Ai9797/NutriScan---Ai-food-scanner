@@ -21,6 +21,7 @@ export type ScanResult = {
   source?: string
   isOod?: boolean
   message?: string
+  imageUrl?: string | null
 }
 export type MealCategory = "breakfast" | "lunch" | "dinner" | "snacks"
 

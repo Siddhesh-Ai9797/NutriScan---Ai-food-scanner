@@ -26,7 +26,7 @@ export async function scanFood(file: File): Promise<ScanResult> {
       carbs  : data.carbs   ?? 0,
       fat    : data.fat     ?? 0,
     },
-    image      : URL.createObjectURL(file),
+    image      : data.image_url ?? URL.createObjectURL(file),
     predictions: (data.top5 ?? []).map((p: { food: string; confidence: number }) => ({
       name      : p.food.replace(/_/g, " "),
       confidence: Math.round(p.confidence * 100),
@@ -36,6 +36,7 @@ export async function scanFood(file: File): Promise<ScanResult> {
     source     : data.source,
     isOod      : data.is_ood,
     message    : data.message,
+    imageUrl   : data.image_url,
   }
 }
 

@@ -102,7 +102,7 @@ function AppShell({
         weightGrams : data.weightGrams ?? null,
         serving     : data.serving ?? null,
         source      : data.source ?? "efficientnet",
-        imageUrl    : null,
+        imageUrl    : data.imageUrl ?? null,
       })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
