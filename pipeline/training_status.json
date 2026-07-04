@@ -1,0 +1,8 @@
+{
+  "total": 2,
+  "ready": false,
+  "threshold": 50,
+  "class_counts": {
+    "boiled egg": 2
+  }
+}
