@@ -64,9 +64,12 @@ async def get_nutrition_by_name(food: str = Query(...)):
             "messages": [{
                 "role": "user",
                 "content": (
-                    f"Give me accurate nutrition facts for '{food}' per 100g serving. "
-                    "Respond ONLY with a JSON object, no extra text:\n"
-                    '{"calories": number, "protein": number, "carbs": number, "fat": number}'
+                    f"You are a nutrition expert. The user described their food as: '{food}'. "
+                    f"Understand what food this is regardless of how it's described — "
+                    f"it could be a casual description, a regional name, or a detailed description like 'hamburger with 3 layers of cheese'. "
+                    f"Identify the food and give accurate nutrition per 100g. "
+                    f"Respond ONLY with JSON, no extra text:\n"
+                    '{{"calories": number, "protein": number, "carbs": number, "fat": number, "food_name": "clean food name"}}'
                 )
             }],
             "max_tokens" : 100,
