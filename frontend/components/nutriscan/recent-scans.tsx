@@ -1,8 +1,12 @@
 "use client"
 
-import { ChevronRight, Plus, UtensilsCrossed } from "lucide-react"
+import { useState } from "react"
+import { Loader2, Plus, Trash2, UtensilsCrossed } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useStore } from "@/lib/store"
+import { useAuth } from "@/lib/auth"
+import { deleteMeal } from "@/lib/meals"
+import { ManualMealForm } from "./manual-meal-form"
 
 const MEAL_LABEL: Record<string, string> = {
   breakfast: "Breakfast",
@@ -12,7 +16,28 @@ const MEAL_LABEL: Record<string, string> = {
 }
 
 export function RecentScans() {
-  const { loggedMeals } = useStore()
+  const { loggedMeals, removeMeal, loadWeekly } = useStore()
+  const { user } = useAuth()
+  const [adding, setAdding]         = useState(false)
+  const [confirmId, setConfirmId]   = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [error, setError]           = useState<string | null>(null)
+
+  async function handleDelete(id: string) {
+    if (confirmId !== id) { setConfirmId(id); return }
+    setDeletingId(id)
+    setError(null)
+    try {
+      await deleteMeal(id)
+      removeMeal(id)
+      if (user) loadWeekly(user.uid)
+    } catch {
+      setError("Couldn't delete that meal. Please try again.")
+    } finally {
+      setDeletingId(null)
+      setConfirmId(null)
+    }
+  }
 
   return (
     <div className="rounded-3xl border border-border bg-card p-5">
@@ -34,10 +59,7 @@ export function RecentScans() {
         <ul className="flex flex-col divide-y divide-border">
           {loggedMeals.map((scan) => (
             <li key={scan.id}>
-              <button
-                type="button"
-                className="flex w-full items-center gap-3 py-3 text-left transition-colors hover:opacity-80"
-              >
+              <div className="flex w-full items-center gap-3 py-3 text-left">
                 <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-accent text-2xl">
                   {scan.image && scan.image.startsWith("blob:")
                     ? "🍽️"
@@ -57,24 +79,44 @@ export function RecentScans() {
                     kcal
                   </span>
                 </span>
-                <ChevronRight
-                  className="size-4 shrink-0 text-muted-foreground"
-                  aria-hidden="true"
-                />
-              </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(scan.id)}
+                  onBlur={() => setConfirmId((c) => (c === scan.id ? null : c))}
+                  disabled={deletingId === scan.id}
+                  aria-label={`Delete ${scan.name}`}
+                  className={`flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition-colors ${
+                    confirmId === scan.id
+                      ? "bg-destructive/10 text-destructive"
+                      : "text-muted-foreground hover:text-destructive"
+                  }`}
+                >
+                  {deletingId === scan.id
+                    ? <Loader2 className="size-4 animate-spin" />
+                    : confirmId === scan.id
+                      ? "Delete?"
+                      : <Trash2 className="size-4" aria-hidden="true" />}
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
 
-      <Button
-        variant="outline"
-        className="mt-4 h-11 w-full rounded-full border-primary text-sm font-semibold text-primary hover:bg-accent hover:text-primary"
-        onClick={() => alert("Manual meal entry coming soon!")}
-      >
-        <Plus className="size-4" aria-hidden="true" />
-        Add Meal Manually
-      </Button>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+
+      {adding && user ? (
+        <ManualMealForm uid={user.uid} onClose={() => setAdding(false)} />
+      ) : (
+        <Button
+          variant="outline"
+          className="mt-4 h-11 w-full rounded-full border-primary text-sm font-semibold text-primary hover:bg-accent hover:text-primary"
+          onClick={() => setAdding(true)}
+        >
+          <Plus className="size-4" aria-hidden="true" />
+          Add Meal Manually
+        </Button>
+      )}
     </div>
   )
 }

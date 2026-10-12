@@ -1,7 +1,7 @@
 import {
   collection, query, where,
   getDocs, serverTimestamp, limit,
-  doc, setDoc, getDoc, updateDoc,
+  doc, setDoc, getDoc, updateDoc, deleteDoc,
   type Timestamp,
 } from "firebase/firestore"
 import { db } from "./firebase"
@@ -53,12 +53,17 @@ export async function updateMeal(id: string, data: MealCorrection): Promise<void
   await updateDoc(doc(db, "meals", id), data)
 }
 
+// ── Delete a meal the user logged by mistake ──────────────────────────────
+export async function deleteMeal(id: string): Promise<void> {
+  await deleteDoc(doc(db, "meals", id))
+}
+
 // ── Fetch today's meals ───────────────────────────────────────────────────
 export async function fetchTodayMeals(userId: string): Promise<MealRecord[]> {
   const q = query(
     collection(db, "meals"),
     where("userId", "==", userId),
-    limit(20)
+    limit(500)
   )
   const snapshot = await getDocs(q)
   const today    = new Date()
@@ -75,7 +80,7 @@ export async function fetchWeeklyMeals(userId: string): Promise<MealRecord[]> {
   const q = query(
     collection(db, "meals"),
     where("userId", "==", userId),
-    limit(100)
+    limit(500)
   )
   const snapshot = await getDocs(q)
   const weekAgo  = new Date()

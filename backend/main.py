@@ -11,7 +11,7 @@ from routers import predict, label, chat, menu, profile
 from services.nutrition_service import get_nutrition as _get_nutrition, NotAFoodError
 from services.ood_service import estimate_named_food
 from services.s3_service import download_food_photo
-from services.auth_service import require_user, rate_limit
+from services.auth_service import require_user, require_admin, rate_limit
 
 app = FastAPI(
     title       = "NutriScan AI",
@@ -47,6 +47,12 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.get("/admin/me", dependencies=[Depends(require_admin)])
+def admin_me():
+    """Lets the /admin page check access without exposing the admin email."""
+    return {"admin": True}
 
 
 NOT_A_FOOD = "We don't recognise \"{food}\" as a food. Please check the spelling or try another name."

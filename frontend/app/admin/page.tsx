@@ -5,35 +5,47 @@ import { useRouter } from "next/navigation"
 import { Loader2, Users, UtensilsCrossed, TrendingUp, Camera, Brain } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { fetchAdminStats, type AdminStats } from "@/lib/admin"
-
-// ── Your admin email — only you can access this page ─────────────────────
-const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL ?? ""
+import { apiFetch } from "@/lib/api"
 
 export default function AdminPage() {
   const { user, loading } = useAuth()
   const router            = useRouter()
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [fetching, setFetching] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
+  // Access is decided by the backend (ADMIN_EMAIL on Railway) and by the
+  // Firestore rules, so the admin email is never shipped to browsers.
   useEffect(() => {
-    if (!loading) {
-      if (!user) { router.push("/auth"); return }
-      if (user.email !== ADMIN_EMAIL) { router.push("/"); return }
-    }
+    if (loading) return
+    if (!user) { router.push("/auth"); return }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await apiFetch("/admin/me")
+        if (!res.ok) { if (!cancelled) router.push("/"); return }
+        const data = await fetchAdminStats()
+        if (!cancelled) setStats(data)
+      } catch {
+        if (!cancelled) setError(
+          "Couldn't load admin data. Check that your Firestore rules give this email admin access.",
+        )
+      } finally {
+        if (!cancelled) setFetching(false)
+      }
+    })()
+    return () => { cancelled = true }
   }, [user, loading, router])
-
-  useEffect(() => {
-    if (user?.email === ADMIN_EMAIL) {
-      fetchAdminStats()
-        .then(setStats)
-        .finally(() => setFetching(false))
-    }
-  }, [user])
 
   if (loading || fetching) return (
     <div className="flex min-h-dvh items-center justify-center">
       <Loader2 className="size-8 animate-spin text-primary" />
     </div>
+  )
+
+  if (error) return (
+    <div className="mx-auto max-w-2xl px-5 py-8 text-sm text-destructive">{error}</div>
   )
 
   if (!stats) return null

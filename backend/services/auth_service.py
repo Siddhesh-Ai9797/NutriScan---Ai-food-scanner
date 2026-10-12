@@ -86,7 +86,20 @@ async def require_user(request: Request) -> str:
     except Exception:
         raise HTTPException(status_code=401, detail="Your session has expired. Please sign in again.")
     request.state.uid = claims["sub"]
+    request.state.claims = claims
     return claims["sub"]
+
+
+async def require_admin(request: Request, uid: str = Depends(require_user)) -> str:
+    """
+    FastAPI dependency: only the email in the ADMIN_EMAIL server variable passes.
+    The email never reaches the browser bundle.
+    """
+    admin_email = os.getenv("ADMIN_EMAIL", "").strip().lower()
+    email = str(request.state.claims.get("email", "")).strip().lower()
+    if not admin_email or email != admin_email:
+        raise HTTPException(status_code=403, detail="Admins only.")
+    return uid
 
 
 # ── Per-user limits (single Railway replica, so memory is enough) ─────────
