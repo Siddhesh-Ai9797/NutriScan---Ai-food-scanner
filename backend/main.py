@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from routers import predict, label, chat, menu, profile
 from services.nutrition_service import get_nutrition as _get_nutrition, NotAFoodError
 from services.ood_service import estimate_named_food
-from services.s3_service import download_food_photo
+from services.s3_service import download_food_photo, signed_photo_url
 from services.auth_service import require_user, require_admin, rate_limit
 
 app = FastAPI(
@@ -53,6 +53,17 @@ def health():
 def admin_me():
     """Lets the /admin page check access without exposing the admin email."""
     return {"admin": True}
+
+
+class PhotoLinksRequest(BaseModel):
+    urls: list[str] = Field(default_factory=list, max_length=50)
+
+
+@app.post("/admin/photo-links", dependencies=[Depends(require_admin)])
+def admin_photo_links(request: PhotoLinksRequest):
+    """15-minute read links for user photos shown on the admin page. The bucket itself is private."""
+    links = {url: signed_photo_url(url) for url in request.urls}
+    return {"links": {url: link for url, link in links.items() if link}}
 
 
 NOT_A_FOOD = "We don't recognise \"{food}\" as a food. Please check the spelling or try another name."

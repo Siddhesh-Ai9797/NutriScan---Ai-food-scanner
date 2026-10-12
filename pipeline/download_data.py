@@ -17,7 +17,6 @@ Output structure:
 
 import boto3
 import os
-import requests
 import shutil
 from dotenv import load_dotenv
 from check_labels import get_labeled_data
@@ -26,6 +25,18 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
 OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "new_training_data")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+S3_BUCKET  = os.getenv("S3_BUCKET_NAME", "food-scanner-unknown-foods")
+s3_client  = boto3.client("s3", region_name=AWS_REGION)
+
+
+def s3_key_from_url(image_url: str) -> str | None:
+    """The bucket is private, so photos are read with AWS keys by their S3 key."""
+    prefix = f"https://{S3_BUCKET}.s3.{AWS_REGION}.amazonaws.com/"
+    if image_url and image_url.startswith(prefix):
+        key = image_url[len(prefix):].split("?", 1)[0]
+        if key.startswith("user-uploads/") and ".." not in key:
+            return key
+    return None
 
 
 def clean_class_name(food_name: str) -> str:
@@ -70,12 +81,12 @@ def download_images(data: dict) -> dict:
                 continue
 
             try:
-                response = requests.get(image_url, timeout=10)
-                response.raise_for_status()
+                key = s3_key_from_url(image_url)
+                if not key:
+                    raise ValueError("not a photo from our bucket")
 
                 img_path = os.path.join(class_dir, f"{class_name}_{i:04d}.jpg")
-                with open(img_path, "wb") as f:
-                    f.write(response.content)
+                s3_client.download_file(S3_BUCKET, key, img_path)
 
                 downloaded  += 1
                 class_count += 1

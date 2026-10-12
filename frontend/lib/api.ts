@@ -56,7 +56,8 @@ export async function scanFood(file: File): Promise<ScanResult> {
       carbs: data.carbs ?? 0,
       fat: data.fat ?? 0,
     },
-    image: data.image_url ?? URL.createObjectURL(file),
+    // The S3 copy is private; preview the photo straight from the device.
+    image: URL.createObjectURL(file),
     predictions: (data.top5 ?? []).map((p: { food: string; confidence: number }) => ({
       name: p.food.replace(/_/g, " "),
       confidence: Math.round(p.confidence * 100),

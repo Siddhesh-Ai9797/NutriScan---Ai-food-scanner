@@ -13,6 +13,7 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [photoLinks, setPhotoLinks] = useState<Record<string, string>>({})
 
   // Access is decided by the backend (ADMIN_EMAIL on Railway) and by the
   // Firestore rules, so the admin email is never shipped to browsers.
@@ -27,6 +28,16 @@ export default function AdminPage() {
         if (!res.ok) { if (!cancelled) router.push("/"); return }
         const data = await fetchAdminStats()
         if (!cancelled) setStats(data)
+        // Photos are private in S3; ask the backend for short-lived links.
+        const urls = data.recentUploads.map((m) => m.imageUrl).filter((u): u is string => !!u)
+        if (urls.length) {
+          const linksRes = await apiFetch("/admin/photo-links", {
+            method : "POST",
+            headers: { "Content-Type": "application/json" },
+            body   : JSON.stringify({ urls }),
+          })
+          if (linksRes.ok && !cancelled) setPhotoLinks((await linksRes.json()).links ?? {})
+        }
       } catch {
         if (!cancelled) setError(
           "Couldn't load admin data. Check that your Firestore rules give this email admin access.",
@@ -124,10 +135,10 @@ export default function AdminPage() {
             Recent photo uploads
           </h2>
           <div className="grid grid-cols-3 gap-2">
-            {stats.recentUploads.map((meal) => (
+            {stats.recentUploads.filter((meal) => meal.imageUrl && photoLinks[meal.imageUrl]).map((meal) => (
               <div key={meal.id} className="relative rounded-xl overflow-hidden">
                 <img
-                  src={meal.imageUrl!}
+                  src={photoLinks[meal.imageUrl!]}
                   alt={meal.name}
                   className="w-full h-24 object-cover"
                 />

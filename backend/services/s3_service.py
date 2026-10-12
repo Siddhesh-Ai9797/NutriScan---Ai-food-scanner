@@ -59,6 +59,16 @@ def key_from_photo_url(image_url: str) -> str | None:
     return key
 
 
+def signed_photo_url(image_url: str, expires_in: int = 900) -> str | None:
+    """Temporary read link for one of our photos (bucket is private). None if the URL isn't ours."""
+    key = key_from_photo_url(image_url)
+    if not key:
+        return None
+    return s3_client.generate_presigned_url(
+        "get_object", Params={"Bucket": S3_BUCKET, "Key": key}, ExpiresIn=expires_in,
+    )
+
+
 def download_food_photo(image_url: str, max_bytes: int = 10 * 1024 * 1024) -> bytes | None:
     """Reads a photo we uploaded earlier. Returns None if the URL is not ours or the read fails."""
     key = key_from_photo_url(image_url)
