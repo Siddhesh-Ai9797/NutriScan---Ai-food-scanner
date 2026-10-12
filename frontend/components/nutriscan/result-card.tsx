@@ -6,7 +6,6 @@ import { Flame, Check, Pencil, Loader2, ChevronDown, ChevronUp } from "lucide-re
 import type { ScanResult } from "@/lib/nutriscan-data"
 import { MacroCards } from "./macro-cards"
 import { MacroDonut } from "./macro-donut"
-import { PredictionsList } from "./predictions-list"
 import { Button } from "@/components/ui/button"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
@@ -289,12 +288,6 @@ export function ResultCard({
       <div className="rounded-3xl border border-border bg-card p-5">
         <SectionLabel>Macro breakdown</SectionLabel>
         <MacroDonut macros={currentResult.macros} calories={currentResult.calories} />
-      </div>
-
-      {/* Top predictions */}
-      <div className="rounded-3xl border border-border bg-card p-5">
-        <SectionLabel>Top 5 predictions</SectionLabel>
-        <PredictionsList predictions={currentResult.predictions} />
       </div>
     </div>
   )
