@@ -40,11 +40,7 @@ export async function scanFood(file: File): Promise<ScanResult> {
     serving: data.serving,
     source: data.source,
     isOod: data.is_ood,
-    message:
-      data.message ??
-      (data.model_guess
-        ? `Our model guessed ${data.model_guess}, but a closer AI check says ${data.food}. Please confirm below.`
-        : undefined),
+    message: data.message,
     imageUrl: data.image_url,
   }
 }

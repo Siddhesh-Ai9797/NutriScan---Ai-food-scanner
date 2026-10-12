@@ -223,6 +223,60 @@ async def gpt4o_identify(image_bytes: bytes) -> dict:
     }
 
 
+async def estimate_named_food(image_bytes: bytes, food_name: str) -> dict | None:
+    """
+    The user corrected the food name. Estimate nutrition for the WHOLE portion
+    in the photo, trusting the user's name. Used instead of per-100g lookups,
+    which are poor for regional dishes (USDA returns packaged products).
+
+    Returns {"food", "weight_grams", "calories", "protein", "carbs", "fat"} or None.
+    """
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    image_b64      = base64.b64encode(image_bytes).decode("utf-8")
+
+    payload = {
+        "model": GPT_MODEL,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
+                {"type": "text", "text": (
+                    f"The user says this photo shows: '{food_name}'. Trust that name, even if it "
+                    "looks like something else to you. You are a nutrition expert. Estimate the weight "
+                    "of the full portion visible and the nutrition for that whole portion, as typically "
+                    "prepared for this dish (include oil, ghee, and meat where the dish normally has them). "
+                    "Respond ONLY with JSON, no extra text:\n"
+                    '{"weight_grams": number, "calories": number, "protein": number, "carbs": number, "fat": number}'
+                )},
+            ],
+        }],
+        "max_tokens" : 150,
+        "temperature": 0.2,
+    }
+    headers = {"Authorization": f"Bearer {openai_api_key}", "Content-Type": "application/json"}
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.post(OPENAI_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+            return None
+        content = response.json()["choices"][0]["message"]["content"].strip()
+        data    = json.loads(content.replace("```json", "").replace("```", "").strip())
+        calories = float(data["calories"])
+        if calories <= 0:
+            return None
+        return {
+            "food"        : food_name,
+            "weight_grams": round(float(data.get("weight_grams") or 0)) or None,
+            "calories"    : round(calories),
+            "protein"     : round(float(data.get("protein") or 0), 1),
+            "carbs"       : round(float(data.get("carbs")   or 0), 1),
+            "fat"         : round(float(data.get("fat")     or 0), 1),
+        }
+    except Exception:
+        return None
+
+
 def _fallback_response(primary_food: str = None) -> dict:
     return {
         "items"         : [],
