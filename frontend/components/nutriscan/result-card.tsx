@@ -65,27 +65,33 @@ export function ResultCard({
     setError(null)
 
     try {
-      // Scale to the portion weight estimated at scan time; without it the
-      // nutrition API answers per 100g, which undercounts a full plate.
-      const params = new URLSearchParams({ food: editedName.trim() })
+      // Re-estimate the whole plate from the original photo plus the corrected
+      // name. The server falls back to a per-100g lookup scaled by `grams`.
       const grams = currentResult.weightGrams
-      if (grams && grams > 0) params.set("grams", String(grams))
-
-      const res = await fetch(`${API_URL}/nutrition?${params}`)
+      const res = await fetch(`${API_URL}/nutrition/estimate`, {
+        method : "POST",
+        headers: { "Content-Type": "application/json" },
+        body   : JSON.stringify({
+          food     : editedName.trim(),
+          image_url: currentResult.imageUrl ?? null,
+          grams    : grams && grams > 0 ? grams : null,
+        }),
+      })
       if (!res.ok) throw new Error("Not found")
       const data = await res.json()
       if (data.calories == null) throw new Error("No nutrition data")
 
       const updated: ScanResult = {
         ...currentResult,
-        name    : editedName.trim(),
-        calories: data.calories,
-        macros  : {
+        name       : editedName.trim(),
+        calories   : data.calories,
+        macros     : {
           protein: data.protein ?? 0,
           carbs  : data.carbs   ?? 0,
           fat    : data.fat     ?? 0,
         },
-        serving : data.serving ?? currentResult.serving,
+        weightGrams: data.weight_grams ?? currentResult.weightGrams,
+        serving    : data.serving ?? currentResult.serving,
       }
       setCurrentResult(updated)
       setConfirmState("confirmed")
@@ -126,7 +132,7 @@ export function ResultCard({
             className="object-cover"
             priority
           />
-          {currentResult.confidence && (
+          {currentResult.confidence > 0 && (
             <span className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-success px-2.5 py-1 text-xs font-semibold text-primary-foreground">
               <Check className="size-3.5" />
               {currentResult.confidence}% match

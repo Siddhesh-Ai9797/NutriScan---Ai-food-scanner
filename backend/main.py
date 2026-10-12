@@ -4,10 +4,13 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 from routers import predict, label, chat, menu, profile
 from services.nutrition_service import get_nutrition as _get_nutrition
+from services.ood_service import estimate_named_food
+from services.s3_service import download_food_photo
 
 app = FastAPI(
     title       = "NutriScan AI",
@@ -71,6 +74,37 @@ async def get_nutrition_by_name(
         }
 
     return result
+
+
+class EstimateRequest(BaseModel):
+    food     : str = Field(..., min_length=1, max_length=120)
+    image_url: Optional[str] = None
+    grams    : Optional[float] = Field(None, gt=0, le=3000)
+
+
+@app.post("/nutrition/estimate")
+async def estimate_corrected_food(request: EstimateRequest):
+    """
+    Called when the user corrects a scanned food's name.
+    Sends the original photo plus the corrected name to GPT-4o so the whole
+    plate is estimated. Falls back to the per-100g lookup scaled by `grams`
+    if the photo is missing or GPT-4o fails.
+    """
+    food = request.food.strip()
+    if not food:
+        raise HTTPException(status_code=400, detail="Food name cannot be empty.")
+
+    image_bytes = download_food_photo(request.image_url) if request.image_url else None
+    if image_bytes:
+        estimate = await estimate_named_food(image_bytes, food)
+        if estimate:
+            return {
+                **estimate,
+                "serving": f"{estimate['weight_grams']}g" if estimate.get("weight_grams") else "full plate",
+                "source" : "gpt4o_photo",
+            }
+
+    return await get_nutrition_by_name(food=food, grams=request.grams)
 
 
 async def _nutrition_per_100g(food: str) -> dict:
