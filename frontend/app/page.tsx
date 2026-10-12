@@ -18,7 +18,7 @@ import { StreakBadge } from "@/components/nutriscan/streak-badge"
 import { GoalSetter } from "@/components/nutriscan/goal-setter"
 import { MenuScanner } from "@/components/nutriscan/menu-scanner"
 import { scanFood } from "@/lib/api"
-import { saveMeal } from "@/lib/meals"
+import { saveMeal, newMealId, updateMeal } from "@/lib/meals"
 import { useStore, getCurrentMeal } from "@/lib/store"
 import { useAuth } from "@/lib/auth"
 import type { ScanResult } from "@/lib/nutriscan-data"
@@ -55,9 +55,12 @@ function AppShell({
   const [result, setResult] = useState<ScanResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // Id and pending save of the meal logged by the current scan, so an edit
+  // can update that same meal instead of leaving the old name and calories.
+  const scanMealRef = useRef<{ id: string; saved: Promise<unknown> } | null>(null)
 
   const {
-    logMeal, totalCalories, totalProtein,
+    logMeal, updateLoggedMeal, totalCalories, totalProtein,
     profile, loadMeals, loadProfile, loadWeekly, loadWater
   } = useStore()
 
@@ -89,10 +92,11 @@ function AppShell({
       setResult(data)
       setScanState("done")
       const meal = getCurrentMeal()
-      logMeal(data, meal)
+      const mealId = newMealId()
+      logMeal(data, meal, mealId)
 
       // Save to Firestore
-      saveMeal(user.uid, {
+      const saved = saveMeal(user.uid, {
         name: data.name,
         calories: data.calories,
         protein: data.macros.protein,
@@ -103,10 +107,34 @@ function AppShell({
         serving: data.serving ?? null,
         source: data.source ?? "efficientnet",
         imageUrl: data.imageUrl ?? null,
-      })
+      }, mealId).catch((err) => console.error("Failed to save meal:", err))
+      scanMealRef.current = { id: mealId, saved }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.")
       setScanState("error")
+    }
+  }
+
+  // User corrected the food name → update the meal this scan logged
+  async function handleCorrected(updated: ScanResult) {
+    setResult(updated)
+    const current = scanMealRef.current
+    if (!current) return
+    updateLoggedMeal(current.id, updated)
+    try {
+      await current.saved
+      await updateMeal(current.id, {
+        name: updated.name,
+        calories: updated.calories,
+        protein: updated.macros.protein,
+        carbs: updated.macros.carbs,
+        fat: updated.macros.fat,
+        source: "user_correction",
+        serving: updated.serving ?? null,
+      })
+      loadWeekly(user.uid)
+    } catch (err) {
+      console.error("Failed to update meal:", err)
     }
   }
 
@@ -114,6 +142,7 @@ function AppShell({
     setScanState("idle")
     setResult(null)
     setError(null)
+    scanMealRef.current = null
   }
 
   function changeTab(next: Tab) {
@@ -173,6 +202,7 @@ function AppShell({
               error={error}
               onFileSelect={() => fileInputRef.current?.click()}
               onReset={reset}
+              onCorrected={handleCorrected}
             />
             <CalorieTracker />
             <WaterTracker uid={user.uid} />
@@ -189,6 +219,7 @@ function AppShell({
               error={error}
               onFileSelect={() => fileInputRef.current?.click()}
               onReset={reset}
+              onCorrected={handleCorrected}
             />
             <MenuScanner />
           </>
@@ -254,12 +285,14 @@ function ScanFlow({
   error,
   onFileSelect,
   onReset,
+  onCorrected,
 }: {
   scanState: ScanState
   result: ScanResult | null
   error: string | null
   onFileSelect: () => void
   onReset: () => void
+  onCorrected: (updated: ScanResult) => void
 }) {
   if (scanState === "scanning") {
     return (
@@ -280,7 +313,7 @@ function ScanFlow({
             {result.message ?? "Identified by AI — please confirm below."}
           </div>
         )}
-        <ResultCard result={result} />
+        <ResultCard result={result} onCorrected={onCorrected} />
         <Button
           variant="outline"
           onClick={onReset}

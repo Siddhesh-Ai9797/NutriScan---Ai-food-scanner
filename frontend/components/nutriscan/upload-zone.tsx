@@ -58,7 +58,7 @@ export function UploadZone({ onScan }: { onScan: () => void }) {
       </div>
       <p className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <Sparkles className="size-3.5 text-primary" aria-hidden="true" />
-        Powered by on-device food recognition
+        Powered by AI food recognition
       </p>
     </div>
   )

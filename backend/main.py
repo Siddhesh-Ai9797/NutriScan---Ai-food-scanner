@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../.env"))
@@ -43,12 +44,36 @@ def health():
 
 
 @app.get("/nutrition")
-async def get_nutrition_by_name(food: str = Query(...)):
+async def get_nutrition_by_name(
+    food : str = Query(...),
+    grams: Optional[float] = Query(None, gt=0, le=3000),
+):
     """
     Fetch nutrition for any food name typed by the user.
     First tries USDA — if nothing found falls back to GPT-4o.
     Handles informal names like 'cheese hamburger', 'pomplet fry', 'dal makhani'.
+
+    Both sources give values per 100g. When `grams` is passed (the portion
+    weight estimated at scan time), values are scaled to that portion so an
+    edited meal is logged at its real size, not as 100g.
     """
+    result = await _nutrition_per_100g(food)
+
+    if grams and result.get("calories") is not None:
+        factor = grams / 100.0
+        result = {
+            **result,
+            "calories": round(result["calories"] * factor),
+            "protein" : round((result.get("protein") or 0) * factor, 1),
+            "carbs"   : round((result.get("carbs")   or 0) * factor, 1),
+            "fat"     : round((result.get("fat")     or 0) * factor, 1),
+            "serving" : f"{round(grams)}g",
+        }
+
+    return result
+
+
+async def _nutrition_per_100g(food: str) -> dict:
     import httpx
     import json
 

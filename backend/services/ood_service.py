@@ -36,7 +36,16 @@ async def detect_all_foods(image_bytes: bytes, primary_food: str = None) -> dict
     openai_api_key = os.getenv("OPENAI_API_KEY")
     image_b64      = base64.b64encode(image_bytes).decode("utf-8")
 
-    primary_hint = f"Our system already identified '{primary_food}' as the main food. " if primary_food else ""
+    # The EfficientNet guess is only a hint. The model only knows 101 Food-101 classes,
+    # so for dishes outside that list (biryani, dal, dosa...) it confidently picks the
+    # closest class. GPT-4o must check the guess against the photo, not repeat it.
+    readable_hint = primary_food.replace("_", " ") if primary_food else None
+    primary_hint = (
+        f"A fast image classifier guessed the main dish is '{readable_hint}'. "
+        "That classifier only knows 101 common Western dishes, so it is often wrong for "
+        "regional cuisine such as Indian, Asian, or Latin dishes. Do not trust the guess. "
+        "Look at the image yourself and name the main dish as it really is. "
+    ) if readable_hint else ""
 
     headers = {
         "Authorization": f"Bearer {openai_api_key}",
@@ -62,6 +71,8 @@ async def detect_all_foods(image_bytes: bytes, primary_food: str = None) -> dict
                             "Estimate the weight and nutrition for each item separately based on the portion size visible. "
                             "Respond ONLY with a JSON object in this exact format, no extra text:\n"
                             "{\n"
+                            '  "primary_food": "specific name of the main dish, e.g. chicken biryani",\n'
+                            '  "hint_correct": true if the classifier guess names the same dish as primary_food, otherwise false,\n'
                             '  "items": [\n'
                             '    {\n'
                             '      "food": "exact food name",\n'
@@ -83,7 +94,7 @@ async def detect_all_foods(image_bytes: bytes, primary_food: str = None) -> dict
                 ]
             }
         ],
-        "max_tokens" : 500,
+        "max_tokens" : 700,
         "temperature": 0.3,
     }
 
@@ -108,8 +119,12 @@ async def detect_all_foods(image_bytes: bytes, primary_food: str = None) -> dict
         total_carbs    = round(data.get("total_carbs")    or sum(i.get("carbs",    0) for i in items), 1)
         total_fat      = round(data.get("total_fat")      or sum(i.get("fat",      0) for i in items), 1)
 
-        # Primary food is first item or EfficientNet result
-        primary = primary_food or (items[0]["food"] if items else "Unknown")
+        # GPT-4o's own name for the main dish; fall back to the first item.
+        gpt_primary  = (data.get("primary_food") or (items[0].get("food") if items else "") or "").strip()
+        # If GPT-4o did not answer, assume the hint stands (old behaviour).
+        hint_correct = data.get("hint_correct")
+        if not isinstance(hint_correct, bool):
+            hint_correct = True
 
         return {
             "items"         : items,
@@ -117,7 +132,8 @@ async def detect_all_foods(image_bytes: bytes, primary_food: str = None) -> dict
             "total_protein" : total_protein,
             "total_carbs"   : total_carbs,
             "total_fat"     : total_fat,
-            "primary_food"  : primary,
+            "primary_food"  : gpt_primary or primary_food or "Unknown",
+            "hint_correct"  : hint_correct,
             "source"        : "gpt4o",
         }
 
