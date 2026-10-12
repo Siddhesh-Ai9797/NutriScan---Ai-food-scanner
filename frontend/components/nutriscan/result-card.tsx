@@ -21,7 +21,13 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-export function ResultCard({ result }: { result: ScanResult }) {
+export function ResultCard({
+  result,
+  onCorrected,
+}: {
+  result: ScanResult
+  onCorrected?: (updated: ScanResult) => void
+}) {
   const [confirmState, setConfirmState]   = useState<ConfirmState>("confirming")
   const [editedName, setEditedName]       = useState("")
   const [currentResult, setCurrentResult] = useState<ScanResult>(result)
@@ -59,24 +65,31 @@ export function ResultCard({ result }: { result: ScanResult }) {
     setError(null)
 
     try {
-      const res = await fetch(
-        `${API_URL}/nutrition?food=${encodeURIComponent(editedName.trim())}`
-      )
+      // Scale to the portion weight estimated at scan time; without it the
+      // nutrition API answers per 100g, which undercounts a full plate.
+      const params = new URLSearchParams({ food: editedName.trim() })
+      const grams = currentResult.weightGrams
+      if (grams && grams > 0) params.set("grams", String(grams))
+
+      const res = await fetch(`${API_URL}/nutrition?${params}`)
       if (!res.ok) throw new Error("Not found")
       const data = await res.json()
+      if (data.calories == null) throw new Error("No nutrition data")
 
       const updated: ScanResult = {
         ...currentResult,
         name    : editedName.trim(),
-        calories: data.calories ?? currentResult.calories,
+        calories: data.calories,
         macros  : {
-          protein: data.protein ?? currentResult.macros.protein,
-          carbs  : data.carbs   ?? currentResult.macros.carbs,
-          fat    : data.fat     ?? currentResult.macros.fat,
+          protein: data.protein ?? 0,
+          carbs  : data.carbs   ?? 0,
+          fat    : data.fat     ?? 0,
         },
+        serving : data.serving ?? currentResult.serving,
       }
       setCurrentResult(updated)
       setConfirmState("confirmed")
+      onCorrected?.(updated)
 
       try {
         await fetch(`${API_URL}/label`, {
@@ -86,10 +99,10 @@ export function ResultCard({ result }: { result: ScanResult }) {
             food_name : editedName.trim(),
             image_url : (result as any).imageUrl ?? null,
             source    : "user_correction",
-            calories  : data.calories,
-            protein   : data.protein,
-            carbs     : data.carbs,
-            fat       : data.fat,
+            calories  : updated.calories,
+            protein   : updated.macros.protein,
+            carbs     : updated.macros.carbs,
+            fat       : updated.macros.fat,
             confirmed : true,
           }),
         })

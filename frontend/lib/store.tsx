@@ -39,7 +39,8 @@ type StoreState = {
 
   // Meals
   loggedMeals: LoggedMeal[]
-  logMeal: (result: ScanResult, meal: MealCategory) => void
+  logMeal: (result: ScanResult, meal: MealCategory, id?: string) => void
+  updateLoggedMeal: (id: string, result: ScanResult) => void
   removeMeal: (id: string) => void
   loadMeals: (uid: string) => Promise<void>
 
@@ -114,9 +115,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [profile])
 
   // ── Meals ──────────────────────────────────────────────────────────────
-  const logMeal = useCallback((result: ScanResult, meal: MealCategory) => {
+  const logMeal = useCallback((result: ScanResult, meal: MealCategory, id?: string) => {
     const newMeal: LoggedMeal = {
-      id: crypto.randomUUID(),
+      id: id ?? crypto.randomUUID(),
       name: result.name,
       calories: result.calories,
       protein: result.macros.protein,
@@ -153,6 +154,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("Failed to load meals:", err)
     }
+  }, [])
+
+  const updateLoggedMeal = useCallback((id: string, result: ScanResult) => {
+    setLoggedMeals((prev) =>
+      prev.map((m) =>
+        m.id === id
+          ? {
+              ...m,
+              name: result.name,
+              calories: result.calories,
+              protein: result.macros.protein,
+              carbs: result.macros.carbs,
+              fat: result.macros.fat,
+            }
+          : m,
+      ),
+    )
   }, [])
 
   const removeMeal = useCallback((id: string) => {
@@ -226,6 +244,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       loadProfile,
       loggedMeals,
       logMeal,
+      updateLoggedMeal,
       removeMeal,
       loadMeals,
       weeklyData,

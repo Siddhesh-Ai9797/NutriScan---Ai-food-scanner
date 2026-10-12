@@ -1,7 +1,7 @@
 import {
-  collection, addDoc, query, where,
+  collection, query, where,
   getDocs, serverTimestamp, limit,
-  doc, setDoc, getDoc,
+  doc, setDoc, getDoc, updateDoc,
   type Timestamp,
 } from "firebase/firestore"
 import { db } from "./firebase"
@@ -24,17 +24,33 @@ export type MealRecord = {
   createdAt   : Timestamp
 }
 
+// ── New meal id (created locally so the UI and Firestore share one id) ────
+export function newMealId(): string {
+  return doc(collection(db, "meals")).id
+}
+
 // ── Save a meal ───────────────────────────────────────────────────────────
 export async function saveMeal(
   userId: string,
-  data  : Omit<MealRecord, "id" | "userId" | "createdAt">
+  data  : Omit<MealRecord, "id" | "userId" | "createdAt">,
+  id    : string = newMealId(),
 ): Promise<string> {
-  const ref = await addDoc(collection(db, "meals"), {
+  await setDoc(doc(db, "meals", id), {
     ...data,
     userId,
     createdAt: serverTimestamp(),
   })
-  return ref.id
+  return id
+}
+
+// ── Update a meal after the user corrects it ──────────────────────────────
+export type MealCorrection = Pick<MealRecord, "name" | "calories" | "protein" | "carbs" | "fat"> & {
+  source : string
+  serving: string | null
+}
+
+export async function updateMeal(id: string, data: MealCorrection): Promise<void> {
+  await updateDoc(doc(db, "meals", id), data)
 }
 
 // ── Fetch today's meals ───────────────────────────────────────────────────

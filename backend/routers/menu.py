@@ -70,6 +70,9 @@ USER'S CURRENT STATUS:
 Look at this restaurant menu and recommend the TOP 3 best dishes based on the user's remaining nutrition goals.
 Also identify 2-3 dishes to avoid and why.
 
+Every "reason", "avoid" and "summary" text is shown directly to the user, so speak to them as "you" and "your"
+(e.g. "fits your remaining calories"). Never say "the user".
+
 Respond ONLY with a JSON object in this exact format, no extra text:
 {{
   "recommendations": [
