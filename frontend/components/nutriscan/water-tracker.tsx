@@ -1,12 +1,12 @@
 "use client"
 
-import { Droplets } from "lucide-react"
+import { Droplets, Undo2 } from "lucide-react"
 import { useStore } from "@/lib/store"
 
 const QUICK_ADD = [150, 250, 350, 500]
 
 export function WaterTracker({uid}: {uid: string}) {
-  const { waterMl, addWater, profile } = useStore()
+  const { waterMl, addWater, undoWater, lastWaterAdd, profile } = useStore()
   const goal  = profile.waterGoal || 2500
   const pct   = Math.min(Math.round((waterMl / goal) * 100), 100)
   const cups  = Math.floor(waterMl / 250)
@@ -64,6 +64,16 @@ export function WaterTracker({uid}: {uid: string}) {
           </button>
         ))}
       </div>
+
+      {lastWaterAdd !== null && (
+        <button
+          onClick={() => undoWater(uid)}
+          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Undo2 className="size-3.5" aria-hidden="true" />
+          Undo last +{lastWaterAdd}ml
+        </button>
+      )}
     </div>
   )
 }

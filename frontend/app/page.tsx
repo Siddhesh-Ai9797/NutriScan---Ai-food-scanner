@@ -179,7 +179,7 @@ function AppShell({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         capture={undefined}
         className="sr-only"
         onChange={(e) => {

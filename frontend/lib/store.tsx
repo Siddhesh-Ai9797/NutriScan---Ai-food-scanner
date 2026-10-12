@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react"
+import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from "react"
 import type { ScanResult, MealCategory } from "./nutriscan-data"
 import { fetchTodayMeals, fetchWeeklyMeals, saveUserProfile, fetchUserProfile, saveWaterIntake, fetchWaterIntake } from "./meals"
 
@@ -24,6 +24,8 @@ export type UserProfile = {
   weightKg: number | null
   age: number | null
   waterGoal: number   // ml per day
+  gender: "male" | "female" | null
+  heightCm: number | null
 }
 
 export type DayCalories = {
@@ -51,6 +53,8 @@ type StoreState = {
   // Water
   waterMl: number
   addWater: (ml: number, uid?: string) => void
+  undoWater: (uid?: string) => void
+  lastWaterAdd: number | null
   resetWater: () => void
   loadWater: (uid: string) => Promise<void>
 
@@ -71,6 +75,8 @@ const DEFAULT_PROFILE: UserProfile = {
   weightKg: null,
   age: null,
   waterGoal: 2500,
+  gender: null,
+  heightCm: null,
 }
 
 const MEAL_LABELS: Record<MealCategory, string> = {
@@ -92,6 +98,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile>(DEFAULT_PROFILE)
   const [weeklyData, setWeeklyData] = useState<DayCalories[]>([])
   const [waterMl, setWaterMl] = useState(0)
+  // Amounts added in this session, newest last, so a wrong tap can be undone.
+  const [waterAdds, setWaterAdds] = useState<number[]>([])
+  // Refs hold the latest values so fast repeated taps never use a stale total.
+  const waterRef = useRef(0)
+  const waterAddsRef = useRef<number[]>([])
+
   const [streak, setStreak] = useState(0)
 
   // ── Profile ────────────────────────────────────────────────────────────
@@ -209,19 +221,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const loadWater = useCallback(async (uid: string) => {
     try {
       const ml = await fetchWaterIntake(uid)
+      waterRef.current = ml
+      waterAddsRef.current = []
+      setWaterAdds([])
       setWaterMl(ml)
     } catch (err) {
       console.error("Failed to load water:", err)
     }
   }, [])
   const addWater = useCallback((ml: number, uid?: string) => {
-    setWaterMl((prev) => {
-      const newTotal = prev + ml
-      if (uid) saveWaterIntake(uid, newTotal)
-      return newTotal
-    })
+    waterRef.current += ml
+    waterAddsRef.current = [...waterAddsRef.current, ml]
+    setWaterMl(waterRef.current)
+    setWaterAdds(waterAddsRef.current)
+    if (uid) saveWaterIntake(uid, waterRef.current).catch((err) => console.error("Failed to save water:", err))
   }, [])
-  const resetWater = useCallback(() => setWaterMl(0), [])
+
+  const undoWater = useCallback((uid?: string) => {
+    const last = waterAddsRef.current[waterAddsRef.current.length - 1]
+    if (last === undefined) return
+    waterRef.current = Math.max(waterRef.current - last, 0)
+    waterAddsRef.current = waterAddsRef.current.slice(0, -1)
+    setWaterMl(waterRef.current)
+    setWaterAdds(waterAddsRef.current)
+    if (uid) saveWaterIntake(uid, waterRef.current).catch((err) => console.error("Failed to save water:", err))
+  }, [])
+  const resetWater = useCallback(() => {
+    waterRef.current = 0
+    waterAddsRef.current = []
+    setWaterAdds([])
+    setWaterMl(0)
+  }, [])
 
   // ── Derived ────────────────────────────────────────────────────────────
   const totalCalories = loggedMeals.reduce((sum, m) => sum + m.calories, 0)
@@ -251,6 +281,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       loadWeekly,
       waterMl,
       addWater,
+      undoWater,
+      lastWaterAdd: waterAdds.length ? waterAdds[waterAdds.length - 1] : null,
       resetWater,
       loadWater,
       streak,

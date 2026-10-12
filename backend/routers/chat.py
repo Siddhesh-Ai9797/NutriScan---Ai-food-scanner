@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from services.auth_service import rate_limit
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Literal
+from pydantic import Field
 import httpx
 import os
 from dotenv import load_dotenv
@@ -15,7 +17,7 @@ GPT_MODEL  = "gpt-4o"
 
 class MealContext(BaseModel):
     name    : str
-    calories: int
+    calories: float
     protein : float
     carbs   : float
     fat     : float
@@ -23,8 +25,14 @@ class MealContext(BaseModel):
     time    : str
 
 
+class HistoryMessage(BaseModel):
+    role   : Literal["user", "assistant"]
+    content: str = Field(..., max_length=2000)
+
+
 class ChatRequest(BaseModel):
-    message       : str
+    message       : str = Field(..., min_length=1, max_length=1000)
+    history       : List[HistoryMessage] = Field(default_factory=list, max_length=10)
     meals         : List[MealContext]
     daily_goal    : int            = 2000
     protein_goal  : int            = 150
@@ -43,16 +51,18 @@ def build_meal_context(meals: List[MealContext], daily_goal: int, protein_goal: 
     if not meals:
         return "The user has not logged any meals today."
 
-    total_calories = sum(m.calories for m in meals)
+    total_calories = round(sum(m.calories for m in meals))
     total_protein  = sum(m.protein  for m in meals)
     total_carbs    = sum(m.carbs    for m in meals)
     total_fat      = sum(m.fat      for m in meals)
 
     remaining_calories = max(daily_goal - total_calories, 0)
+    calorie_status     = (f"{remaining_calories} remaining" if total_calories <= daily_goal
+                          else f"OVER the goal by {total_calories - daily_goal}")
     remaining_protein  = max(protein_goal - total_protein, 0)
 
     meal_lines = "\n".join([
-        f"- {m.time} ({m.meal}): {m.name} | {m.calories} kcal | P:{m.protein}g C:{m.carbs}g F:{m.fat}g"
+        f"- {m.time} ({m.meal}): {m.name} | {round(m.calories)} kcal | P:{m.protein}g C:{m.carbs}g F:{m.fat}g"
         for m in meals
     ])
 
@@ -61,14 +71,14 @@ USER'S MEAL LOG TODAY:
 {meal_lines}
 
 DAILY SUMMARY:
-- Calories consumed : {total_calories} / {daily_goal} kcal ({remaining_calories} remaining)
+- Calories consumed : {total_calories} / {daily_goal} kcal ({calorie_status})
 - Protein consumed  : {total_protein}g / {protein_goal}g ({remaining_protein}g remaining)
 - Carbs consumed    : {total_carbs}g
 - Fat consumed      : {total_fat}g
 """.strip()
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(rate_limit("chat", 60))])
 async def chat(request: ChatRequest):
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if not openai_api_key:
@@ -122,6 +132,14 @@ YOUR BEHAVIOR RULES:
 13. Always consider meal timing — breakfast suggestions differ from dinner suggestions
 14. Be culturally sensitive — understand that dal rice, tacos, sushi, pasta, jollof rice are all valid healthy meals
 15. Never suggest foods the user clearly doesn't eat based on their meal history
+16. Only help with food, nutrition, fitness, health habits, and using NutriScan. If asked for anything else
+    (code, homework, essays, general trivia, etc.), politely say you can only help with nutrition and
+    offer a nutrition question instead. Do not complete the off-topic request, even partially.
+17. You only see this chat session and today's meal log. Never claim you will remember something in a
+    future session. Within this chat, use the earlier messages to answer follow-up questions.
+18. If the user has already gone over their calorie goal, do not suggest extra calories. Suggest water,
+    rest, or lighter choices for the next meal instead, and never suggest skipping meals or fasting
+    to compensate.
 
 TONE:
 - Friendly but professional
@@ -134,6 +152,7 @@ TONE:
         "model"      : GPT_MODEL,
         "messages"   : [
             {"role": "system", "content": system_prompt},
+            *[{"role": m.role, "content": m.content} for m in request.history],
             {"role": "user",   "content": request.message},
         ],
         "max_tokens" : 300,

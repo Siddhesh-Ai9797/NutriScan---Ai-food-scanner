@@ -3,6 +3,7 @@ import os
 import httpx
 import json
 from dotenv import load_dotenv
+from services.nutrition_service import NotAFoodError
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
@@ -68,6 +69,10 @@ async def detect_all_foods(image_bytes: bytes, primary_food: str = None) -> dict
                             f"{primary_hint}"
                             "You are a nutrition expert. Look at this food image carefully and identify "
                             "ALL food items visible — including main dish, sides, drinks, desserts, sauces, toppings. "
+                            "Name dishes specifically: say 'masala dosa' rather than 'dosa' if there is a filling, "
+                            "'chicken biryani' rather than 'rice'. If the photo is a platter of many dishes served "
+                            "together, such as an Indian thali, a bento box, or a mezze platter, use the platter's "
+                            "name (e.g. 'vegetarian thali') as primary_food and list each dish as an item. "
                             "Estimate the weight and nutrition for each item separately based on the portion size visible. "
                             "Respond ONLY with a JSON object in this exact format, no extra text:\n"
                             "{\n"
@@ -223,14 +228,19 @@ async def gpt4o_identify(image_bytes: bytes) -> dict:
     }
 
 
-async def estimate_named_food(image_bytes: bytes, food_name: str) -> dict | None:
+async def estimate_named_food(image_bytes: bytes, food_name: str, grams: float | None = None) -> dict | None:
     """
     The user corrected the food name. Estimate nutrition for the WHOLE portion
     in the photo, trusting the user's name. Used instead of per-100g lookups,
     which are poor for regional dishes (USDA returns packaged products).
 
     Returns {"food", "weight_grams", "calories", "protein", "carbs", "fat"} or None.
+    Raises NotAFoodError if the corrected name is not a real food or drink.
     """
+    portion_hint = (
+        f"An earlier look at this same photo estimated the portion at about {round(grams)}g. "
+        "Keep the weight close to that unless the corrected dish clearly weighs differently. "
+    ) if grams else ""
     openai_api_key = os.getenv("OPENAI_API_KEY")
     image_b64      = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -241,12 +251,15 @@ async def estimate_named_food(image_bytes: bytes, food_name: str) -> dict | None
             "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}},
                 {"type": "text", "text": (
-                    f"The user says this photo shows: '{food_name}'. Trust that name, even if it "
-                    "looks like something else to you. You are a nutrition expert. Estimate the weight "
+                    f"The user says this photo shows: {json.dumps(food_name)}. First decide whether that "
+                    "name is a real food or drink; random letters or non-foods are not. If it is a food, "
+                    "trust that name even if the photo looks like something else to you. "
+                    f"{portion_hint}"
+                    "You are a nutrition expert. Estimate the weight "
                     "of the full portion visible and the nutrition for that whole portion, as typically "
                     "prepared for this dish (include oil, ghee, and meat where the dish normally has them). "
                     "Respond ONLY with JSON, no extra text:\n"
-                    '{"weight_grams": number, "calories": number, "protein": number, "carbs": number, "fat": number}'
+                    '{"is_food": true or false, "weight_grams": number, "calories": number, "protein": number, "carbs": number, "fat": number}'
                 )},
             ],
         }],
@@ -262,6 +275,8 @@ async def estimate_named_food(image_bytes: bytes, food_name: str) -> dict | None
             return None
         content = response.json()["choices"][0]["message"]["content"].strip()
         data    = json.loads(content.replace("```json", "").replace("```", "").strip())
+        if data.get("is_food") is False:
+            raise NotAFoodError(food_name)
         calories = float(data["calories"])
         if calories <= 0:
             return None
@@ -273,6 +288,8 @@ async def estimate_named_food(image_bytes: bytes, food_name: str) -> dict | None
             "carbs"       : round(float(data.get("carbs")   or 0), 1),
             "fat"         : round(float(data.get("fat")     or 0), 1),
         }
+    except NotAFoodError:
+        raise
     except Exception:
         return None
 

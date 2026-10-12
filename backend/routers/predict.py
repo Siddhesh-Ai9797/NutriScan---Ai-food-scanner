@@ -1,7 +1,8 @@
 import re
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from services.auth_service import rate_limit
+from services.image_service import normalize_image, ImageError, NOT_AN_IMAGE
 from services.model_service import classifier
-from services.nutrition_service import get_nutrition
 from services.ood_service import detect_all_foods
 from services.s3_service import upload_food_photo
 
@@ -14,7 +15,7 @@ def _folder_name(name: str) -> str:
     return cleaned or "unknown"
 
 
-@router.post("/predict")
+@router.post("/predict", dependencies=[Depends(rate_limit("predict", 60))])
 async def predict(file: UploadFile = File(...)):
     """
     Main prediction endpoint.
@@ -28,28 +29,25 @@ async def predict(file: UploadFile = File(...)):
         5. Return combined nutrition for everything on the plate
     """
 
-    # ── Validate file type ────────────────────────────────────────────────
-    if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file type. Please upload a JPEG, PNG, or WEBP image."
-        )
+    # ── Validate and normalise the photo ──────────────────────────────────
+    # Anything Pillow can open is accepted (JPEG, PNG, WEBP, iPhone HEIC...)
+    # and converted to a clean JPEG; other files get a clear 400 message.
+    if file.content_type and not (
+        file.content_type.startswith("image/") or file.content_type == "application/octet-stream"
+    ):
+        raise HTTPException(status_code=400, detail=NOT_AN_IMAGE)
 
-    # ── Read image bytes ──────────────────────────────────────────────────
-    image_bytes = await file.read()
-
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail="Image too large. Please upload an image under 10MB."
-        )
+    try:
+        image_bytes = normalize_image(await file.read())
+    except ImageError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     # ── Step 1: EfficientNet inference ────────────────────────────────────
     try:
         food_label, confidence, is_ood = classifier.predict(image_bytes)
         top5 = classifier.top5_predictions(image_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Model inference failed: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Our food model had a problem. Please try again.")
 
     # ── Step 2: GPT-4o detects ALL food items in the photo ───────────────
     # Pass EfficientNet's result as a hint to verify if it was confident
@@ -75,7 +73,7 @@ async def predict(file: UploadFile = File(...)):
         image_url = upload_food_photo(
             image_bytes  = image_bytes,
             food_label   = _folder_name(display_name) if display_name else "unknown",
-            content_type = file.content_type or "image/jpeg",
+            content_type = "image/jpeg",
         )
     except Exception:
         image_url = None

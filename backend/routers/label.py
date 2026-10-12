@@ -1,8 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from services.auth_service import rate_limit
+from services.s3_service import key_from_photo_url
 from pydantic import BaseModel
 from typing import Optional
 import boto3
 import os
+import re
+import unicodedata
 import uuid
 from datetime import datetime
 from dotenv import load_dotenv
@@ -30,31 +34,51 @@ class LabelRequest(BaseModel):
     confirmed : bool = True
 
 
-@router.post("/label")
+def clean_food_name(name: str) -> str:
+    """
+    Keeps letters (any language), digits, spaces and simple punctuation.
+    Strips HTML and control characters so labels are safe to train on and display.
+    """
+    name = re.sub(r"<[^>]*>", " ", name or "")
+    name = "".join(ch for ch in name if unicodedata.category(ch)[0] in ("L", "N", "M") or ch in " -'&,./()")
+    return re.sub(r"\s+", " ", name).strip().lower()[:80]
+
+
+def _num(value):
+    """DynamoDB-friendly number string; keeps 0, drops missing or negative values."""
+    return str(value) if value is not None and value >= 0 else None
+
+
+@router.post("/label", dependencies=[Depends(rate_limit("label", 120))])
 async def save_label(request: LabelRequest):
     """
     Called when user confirms or corrects a food identification.
     Saves label + nutrition data to DynamoDB for future retraining.
     Image is already in S3 from the predict endpoint.
     """
-    if not request.food_name.strip():
+    food_name = clean_food_name(request.food_name)
+    if not food_name:
         raise HTTPException(status_code=400, detail="Food name cannot be empty.")
+    # Only photos this API uploaded; the retrain pipeline downloads these URLs.
+    image_url = request.image_url if request.image_url and key_from_photo_url(request.image_url) else None
+    if request.source not in ("efficientnet", "gpt4o", "user_correction"):
+        raise HTTPException(status_code=400, detail="Unknown label source.")
 
     label_id = str(uuid.uuid4())
 
     try:
         table.put_item(Item={
             "image_id"  : label_id,
-            "food_name" : request.food_name.strip().lower(),
-            "image_url" : request.image_url,
+            "food_name" : food_name,
+            "image_url" : image_url,
             "source"    : request.source,
-            "calories"  : str(request.calories) if request.calories else None,
-            "protein"   : str(request.protein)  if request.protein  else None,
-            "carbs"     : str(request.carbs)    if request.carbs    else None,
-            "fat"       : str(request.fat)      if request.fat      else None,
+            "calories"  : _num(request.calories),
+            "protein"   : _num(request.protein),
+            "carbs"     : _num(request.carbs),
+            "fat"       : _num(request.fat),
             "confirmed" : request.confirmed,
             "vote_count": 1,
-            "votes"     : [request.food_name.strip().lower()],
+            "votes"     : [food_name],
             "created_at": datetime.utcnow().isoformat(),
         })
     except Exception as e:
@@ -63,11 +87,11 @@ async def save_label(request: LabelRequest):
     return {
         "status"   : "saved",
         "label_id" : label_id,
-        "food_name": request.food_name.strip(),
+        "food_name": food_name,
     }
 
 
-@router.post("/vote/{image_id}")
+@router.post("/vote/{image_id}", dependencies=[Depends(rate_limit("label", 120))])
 async def vote_label(
     image_id : str,
     food_name: str,
@@ -86,7 +110,10 @@ async def vote_label(
 
         votes      = item.get("votes", [])
         vote_count = item.get("vote_count", 0) + 1
-        votes.append(food_name.strip().lower())
+        cleaned = clean_food_name(food_name)
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="Food name cannot be empty.")
+        votes.append(cleaned)
 
         # Majority vote — most common label wins
         confirmed_label = max(set(votes), key=votes.count)

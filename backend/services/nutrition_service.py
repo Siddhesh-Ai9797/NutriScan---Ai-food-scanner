@@ -1,66 +1,83 @@
-import httpx
+"""
+Nutrition for a food typed by name (no photo).
+
+USDA FoodData Central used to be the first source, but its top search hit is
+often a branded or raw product (banana 312 kcal/100g, white rice as dry grain,
+any made-up word matched to some product). GPT-4o now estimates typical
+per-100g values for the food as normally eaten, and first confirms the name is
+actually a food.
+"""
+import json
 import os
-from dotenv import load_dotenv
 
-load_dotenv("../.env")
+import httpx
 
-USDA_SEARCH_URL = "https://api.nal.usda.gov/fdc/v1/foods/search"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+GPT_MODEL  = "gpt-4o"
 
 
-async def get_nutrition(food_label: str) -> dict:
+class NotAFoodError(ValueError):
+    """The name does not describe a real food or drink."""
+
+
+async def get_nutrition(food_name: str) -> dict | None:
     """
-    Calls USDA FoodData Central API with a food label.
-    Returns calories, protein, carbs, fat per 100g serving.
+    Returns per-100g values:
+        {"food", "calories", "protein", "carbs", "fat", "serving": "per 100g", "source"}
+    Raises NotAFoodError for names that are not food. Returns None if GPT-4o fails.
     """
-    # Read key inside function — guarantees .env is already loaded
-    usda_api_key = os.getenv("USDA_API_KEY")
-
-    query = food_label.replace("_", " ")
-
-    params = {
-        "query"   : query,
-        "api_key" : usda_api_key,
-        "pageSize": 1,
+    payload = {
+        "model": GPT_MODEL,
+        "messages": [{
+            "role": "user",
+            "content": (
+                "You are a nutrition expert. A user typed this food name: "
+                f"{json.dumps(food_name)}.\n"
+                "It may be informal, a regional name in any cuisine, or a description like "
+                "'hamburger with 3 layers of cheese'. First decide if it is a real food or drink. "
+                "Random letters, objects, or non-foods are not.\n"
+                "If it is a food, give typical nutrition per 100g AS NORMALLY EATEN "
+                "(cooked rice, not dry grain; fresh fruit, not dried or chips; plain yogurt unless "
+                "a flavour is named), using reference values such as USDA where they exist.\n"
+                "Respond ONLY with JSON, no extra text:\n"
+                '{"is_food": true or false, "food_name": "clean food name", '
+                '"calories": number, "protein": number, "carbs": number, "fat": number}'
+            ),
+        }],
+        "max_tokens" : 120,
+        "temperature": 0.1,
+    }
+    headers = {
+        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+        "Content-Type" : "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(USDA_SEARCH_URL, params=params)
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(OPENAI_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+            return None
+        content = response.json()["choices"][0]["message"]["content"].strip()
+        data    = json.loads(content.replace("```json", "").replace("```", "").strip())
+    except (httpx.HTTPError, KeyError, IndexError, ValueError):
+        return None
 
-    if response.status_code != 200:
-        return _fallback_nutrition(food_label)
+    if data.get("is_food") is False:
+        raise NotAFoodError(food_name)
 
-    data  = response.json()
-    foods = data.get("foods", [])
-
-    if not foods:
-        return _fallback_nutrition(food_label)
-
-    food      = foods[0]
-    nutrients = {n["nutrientName"]: n.get("value", 0) for n in food.get("foodNutrients", [])}
-
-    calories = round(nutrients.get("Energy", 0))
-    protein  = round(nutrients.get("Protein", 0), 1)
-    carbs    = round(nutrients.get("Carbohydrate, by difference", 0), 1)
-    fat      = round(nutrients.get("Total lipid (fat)", 0), 1)
+    try:
+        calories = float(data["calories"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if calories < 0 or calories > 950:   # nothing exceeds pure fat (~900 kcal/100g)
+        return None
 
     return {
-        "food"    : food_label.replace("_", " ").title(),
-        "calories": calories,
-        "protein" : protein,
-        "carbs"   : carbs,
-        "fat"     : fat,
+        "food"    : (data.get("food_name") or food_name).strip(),
+        "calories": round(calories),
+        "protein" : round(float(data.get("protein") or 0), 1),
+        "carbs"   : round(float(data.get("carbs")   or 0), 1),
+        "fat"     : round(float(data.get("fat")     or 0), 1),
         "serving" : "per 100g",
-        "source"  : "USDA FoodData Central",
-    }
-
-
-def _fallback_nutrition(food_label: str) -> dict:
-    return {
-        "food"    : food_label.replace("_", " ").title(),
-        "calories": None,
-        "protein" : None,
-        "carbs"   : None,
-        "fat"     : None,
-        "serving" : None,
-        "error"   : "Nutrition data unavailable. Please enter manually.",
+        "source"  : "gpt4o",
     }

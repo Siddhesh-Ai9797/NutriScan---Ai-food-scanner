@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
 
 router = APIRouter()
 
@@ -48,47 +48,65 @@ def get_goal_presets():
     return GOAL_PRESETS
 
 
+# Safety limits. Below these, an unsupervised app should not set a target.
+MIN_CALORIES = {"female": 1200, "male": 1500}
+MAX_DEFICIT_FRACTION = 0.20      # never cut more than 20% below maintenance
+MAX_PROTEIN_G = 220              # cap for very heavy users
+
+
 @router.post("/goals/calculate")
 def calculate_goals(
-    weight_kg     : float,
-    age           : int,
-    fitness_goal  : str   = "maintaining",
-    activity_level: str   = "moderate",
-    gender        : str   = "male",
+    weight_kg     : float = Query(..., ge=25, le=300, description="Body weight in kg"),
+    age           : int   = Query(..., ge=13, le=100),
+    fitness_goal  : Literal["cutting", "bulking", "maintaining"] = "maintaining",
+    activity_level: Literal["sedentary", "moderate", "active"]   = "moderate",
+    gender        : Literal["male", "female"]                    = "male",
+    height_cm     : float = Query(170, ge=120, le=230),
 ):
     """
     Calculate personalized calorie and protein goals using
-    Mifflin-St Jeor equation + activity multiplier.
+    Mifflin-St Jeor equation + activity multiplier, with safety limits.
     """
     # Mifflin-St Jeor BMR
     if gender == "male":
-        bmr = 10 * weight_kg + 6.25 * 170 - 5 * age + 5
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
     else:
-        bmr = 10 * weight_kg + 6.25 * 160 - 5 * age - 161
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
 
-    # Activity multiplier
-    multipliers = {
-        "sedentary": 1.2,
-        "moderate" : 1.55,
-        "active"   : 1.725,
-    }
-    tdee = bmr * multipliers.get(activity_level, 1.55)
+    multipliers = {"sedentary": 1.2, "moderate": 1.55, "active": 1.725}
+    tdee = bmr * multipliers[activity_level]
 
-    # Adjust for fitness goal
-    if fitness_goal == "cutting":
-        daily_goal   = round(tdee - 400)
-        protein_goal = round(weight_kg * 2.2)   # 2.2g per kg for cutting
-    elif fitness_goal == "bulking":
-        daily_goal   = round(tdee + 300)
-        protein_goal = round(weight_kg * 2.0)   # 2g per kg for bulking
+    notes = []
+    effective_goal = fitness_goal
+    if age < 18 and fitness_goal == "cutting":
+        effective_goal = "maintaining"
+        notes.append("We don't set calorie deficits for users under 18. Talk to a doctor before dieting.")
+
+    if effective_goal == "cutting":
+        daily_goal   = max(tdee - 400, tdee * (1 - MAX_DEFICIT_FRACTION))
+        protein_goal = weight_kg * 2.2
+    elif effective_goal == "bulking":
+        daily_goal   = tdee + 300
+        protein_goal = weight_kg * 2.0
     else:
-        daily_goal   = round(tdee)
-        protein_goal = round(weight_kg * 1.8)   # 1.8g per kg for maintaining
+        daily_goal   = tdee
+        protein_goal = weight_kg * 1.8
+
+    floor = MIN_CALORIES[gender]
+    if daily_goal < floor:
+        daily_goal = floor
+        notes.append(
+            f"Your calculated target was below {floor} kcal, so we set it to {floor} kcal. "
+            "Please check with a doctor or dietitian before eating less than this."
+        )
+    if protein_goal > MAX_PROTEIN_G:
+        protein_goal = MAX_PROTEIN_G
 
     return {
         "bmr"         : round(bmr),
         "tdee"        : round(tdee),
-        "daily_goal"  : daily_goal,
-        "protein_goal": protein_goal,
-        "fitness_goal": fitness_goal,
+        "daily_goal"  : round(daily_goal),
+        "protein_goal": round(protein_goal),
+        "fitness_goal": effective_goal,
+        "notes"       : notes,
     }
