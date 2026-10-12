@@ -2,11 +2,34 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "PublicReadGetObject",
-      "Effect": "Allow",
+      "Sid": "DenyAnyoneOutsideThisAccount",
+      "Effect": "Deny",
       "Principal": "*",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::food-scanner-unknown-foods/*"
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::food-scanner-unknown-foods",
+        "arn:aws:s3:::food-scanner-unknown-foods/*"
+      ],
+      "Condition": {
+        "StringNotEquals": {
+          "aws:PrincipalAccount": "753093280070"
+        }
+      }
+    },
+    {
+      "Sid": "DenyUnencryptedConnections",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::food-scanner-unknown-foods",
+        "arn:aws:s3:::food-scanner-unknown-foods/*"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
     }
   ]
 }
