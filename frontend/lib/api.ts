@@ -1,7 +1,32 @@
 import type { ScanResult } from "./nutriscan-data"
 import type { LoggedMeal, UserProfile } from "./store"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+import { auth } from "./firebase"
+
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+// ── Signed-in requests ────────────────────────────────────────────────────
+// Every backend call carries the user's Firebase ID token; the API rejects
+// requests without one.
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers)
+  const user = auth.currentUser
+  if (user) headers.set("Authorization", `Bearer ${await user.getIdToken()}`)
+  return fetch(`${API_URL}${path}`, { ...init, headers })
+}
+
+// Turns an error response into a message a user can act on.
+export async function apiErrorMessage(response: Response): Promise<string> {
+  try {
+    const data = await response.json()
+    if (typeof data?.detail === "string" && data.detail.trim()) return data.detail
+  } catch { /* not JSON */ }
+  if (response.status === 401) return "Please sign in again."
+  if (response.status === 413) return "That photo is too large. Please use one under 10MB."
+  if (response.status === 429) return "You've reached the limit for now. Please try again a little later."
+  if (response.status >= 500) return "Our server had a problem. Please try again in a moment."
+  return "Something went wrong. Please try again."
+}
 
 // ── Scan food photo ───────────────────────────────────────────────────────
 export async function scanFood(file: File): Promise<ScanResult> {
@@ -11,14 +36,14 @@ export async function scanFood(file: File): Promise<ScanResult> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 120000) // 2 min timeout
 
-  const response = await fetch(`${API_URL}/predict`, {
+  const response = await apiFetch("/predict", {
     method: "POST",
     body: formData,
     signal: controller.signal,
   })
   clearTimeout(timeout)
 
-  if (!response.ok) throw new Error(`API error: ${response.statusText}`)
+  if (!response.ok) throw new Error(await apiErrorMessage(response))
 
   const data = await response.json()
 
@@ -56,8 +81,9 @@ export async function askCoach(
   meals: LoggedMeal[],
   profile: UserProfile,
   userName: string,
+  history: ChatMessage[] = [],
 ): Promise<string> {
-  const response = await fetch(`${API_URL}/chat`, {
+  const response = await apiFetch("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -76,10 +102,14 @@ export async function askCoach(
       fitness_goal: profile.fitnessGoal,
       activity_level: profile.activityLevel,
       user_name: userName,
+      history: history.map((m) => ({
+        role: m.role === "coach" ? "assistant" : "user",
+        content: m.content.slice(0, 2000),
+      })),
     }),
   })
 
-  if (!response.ok) throw new Error("Coach unavailable")
+  if (!response.ok) throw new Error(await apiErrorMessage(response))
   const data = await response.json()
   return data.reply
 }
@@ -115,12 +145,12 @@ export async function scanMenu(
   formData.append("protein_consumed", String(proteinConsumed))
   formData.append("protein_goal", String(proteinGoal))
 
-  const response = await fetch(`${API_URL}/scan-menu`, {
+  const response = await apiFetch("/scan-menu", {
     method: "POST",
     body: formData,
   })
 
-  if (!response.ok) throw new Error("Menu scanner unavailable")
+  if (!response.ok) throw new Error(await apiErrorMessage(response))
   return response.json()
 }
 
@@ -130,20 +160,22 @@ export async function calculateGoals(
   age: number,
   fitnessGoal: string,
   activityLevel: string,
-  gender: string = "male",
-) {
+  gender: "male" | "female",
+  heightCm: number,
+): Promise<{ daily_goal: number; protein_goal: number; fitness_goal: string; notes: string[] }> {
   const params = new URLSearchParams({
     weight_kg: String(weightKg),
     age: String(age),
     fitness_goal: fitnessGoal,
     activity_level: activityLevel,
     gender,
+    height_cm: String(heightCm),
   })
 
-  const response = await fetch(`${API_URL}/goals/calculate?${params}`, {
+  const response = await apiFetch(`/goals/calculate?${params}`, {
     method: "POST",
   })
 
-  if (!response.ok) throw new Error("Goal calculation failed")
+  if (!response.ok) throw new Error(await apiErrorMessage(response))
   return response.json()
 }

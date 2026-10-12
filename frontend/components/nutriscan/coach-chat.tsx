@@ -38,17 +38,24 @@ export function CoachChat({ userName }: { userName: string }) {
     if (!text.trim() || loading) return
 
     const userMsg: Message = { role: "user", content: text }
+    // Recent turns so follow-up questions make sense (greeting excluded).
+    const history = messages.slice(1).slice(-10)
     setMessages((prev) => [...prev, userMsg])
     setInput("")
     setLoading(true)
 
     try {
-      const reply = await askCoach(text, loggedMeals, profile, userName)
+      const reply = await askCoach(text, loggedMeals, profile, userName, history)
       setMessages((prev) => [...prev, { role: "coach", content: reply }])
-    } catch {
+    } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { role: "coach", content: "Sorry, I'm having trouble connecting. Try again in a moment." },
+        {
+          role: "coach",
+          content: err instanceof Error && err.message
+            ? err.message
+            : "Sorry, I'm having trouble connecting. Try again in a moment.",
+        },
       ])
     } finally {
       setLoading(false)

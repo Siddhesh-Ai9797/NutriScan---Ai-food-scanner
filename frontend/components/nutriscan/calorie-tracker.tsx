@@ -7,6 +7,7 @@ export function CalorieTracker() {
   const { dailyGoal, proteinGoal } = profile
 
   const remaining    = Math.max(dailyGoal - totalCalories, 0)
+  const overBy       = Math.max(totalCalories - dailyGoal, 0)
   const calPct       = Math.min(Math.round((totalCalories / dailyGoal) * 100), 100)
   const proteinPct   = Math.min(Math.round((totalProtein / proteinGoal) * 100), 100)
 
@@ -27,15 +28,17 @@ export function CalorieTracker() {
           </p>
         </div>
         <div className="text-right">
-          <span className="text-sm font-semibold tabular-nums text-primary">{remaining}</span>
-          <p className="text-xs font-medium text-muted-foreground">left</p>
+          <span className={`text-sm font-semibold tabular-nums ${overBy > 0 ? "text-destructive" : "text-primary"}`}>
+            {overBy > 0 ? overBy : remaining}
+          </span>
+          <p className="text-xs font-medium text-muted-foreground">{overBy > 0 ? "over" : "left"}</p>
         </div>
       </div>
 
       {/* Calorie bar */}
       <div className="mt-4 h-2.5 w-full overflow-hidden rounded-full bg-muted">
         <div
-          className="h-full rounded-full bg-primary transition-all"
+          className={`h-full rounded-full transition-all ${overBy > 0 ? "bg-destructive" : "bg-primary"}`}
           style={{ width: `${calPct}%` }}
         />
       </div>

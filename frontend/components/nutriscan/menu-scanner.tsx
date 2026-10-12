@@ -27,8 +27,8 @@ export function MenuScanner() {
         profile.proteinGoal,
       )
       setResult(data)
-    } catch {
-      setError("Could not scan menu. Try a clearer photo with readable text.")
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Could not scan menu. Try a clearer photo with readable text.")
     } finally {
       setLoading(false)
     }
@@ -50,7 +50,7 @@ export function MenuScanner() {
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         className="sr-only"
         onChange={(e) => {
           const file = e.target.files?.[0]

@@ -7,8 +7,8 @@ import type { ScanResult } from "@/lib/nutriscan-data"
 import { MacroCards } from "./macro-cards"
 import { MacroDonut } from "./macro-donut"
 import { Button } from "@/components/ui/button"
+import { apiFetch, apiErrorMessage } from "@/lib/api"
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
 type ConfirmState = "confirming" | "editing" | "loading" | "confirmed"
 
@@ -40,7 +40,7 @@ export function ResultCard({
   async function handleConfirm() {
     setConfirmState("confirmed")
     try {
-      await fetch(`${API_URL}/label`, {
+      await apiFetch("/label", {
         method : "POST",
         headers: { "Content-Type": "application/json" },
         body   : JSON.stringify({
@@ -67,7 +67,7 @@ export function ResultCard({
       // Re-estimate the whole plate from the original photo plus the corrected
       // name. The server falls back to a per-100g lookup scaled by `grams`.
       const grams = currentResult.weightGrams
-      const res = await fetch(`${API_URL}/nutrition/estimate`, {
+      const res = await apiFetch("/nutrition/estimate", {
         method : "POST",
         headers: { "Content-Type": "application/json" },
         body   : JSON.stringify({
@@ -76,9 +76,9 @@ export function ResultCard({
           grams    : grams && grams > 0 ? grams : null,
         }),
       })
-      if (!res.ok) throw new Error("Not found")
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       const data = await res.json()
-      if (data.calories == null) throw new Error("No nutrition data")
+      if (data.calories == null) throw new Error("Couldn't find nutrition for this food. Try a different name.")
 
       const updated: ScanResult = {
         ...currentResult,
@@ -97,7 +97,7 @@ export function ResultCard({
       onCorrected?.(updated)
 
       try {
-        await fetch(`${API_URL}/label`, {
+        await apiFetch("/label", {
           method : "POST",
           headers: { "Content-Type": "application/json" },
           body   : JSON.stringify({
@@ -113,8 +113,8 @@ export function ResultCard({
         })
       } catch { /* silent */ }
 
-    } catch {
-      setError("Couldn't find nutrition for this food. Try a different name.")
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Couldn't find nutrition for this food. Try a different name.")
       setConfirmState("editing")
     }
   }

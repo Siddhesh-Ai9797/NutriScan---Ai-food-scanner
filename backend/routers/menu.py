@@ -1,4 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from services.auth_service import rate_limit
+from services.image_service import normalize_image, ImageError, NOT_AN_IMAGE
 from pydantic import BaseModel
 from typing import List, Optional
 import httpx
@@ -31,7 +33,7 @@ class MenuScanResponse(BaseModel):
     remaining_calories: int
 
 
-@router.post("/scan-menu", response_model=MenuScanResponse)
+@router.post("/scan-menu", response_model=MenuScanResponse, dependencies=[Depends(rate_limit("menu", 30))])
 async def scan_menu(
     file              : UploadFile = File(...),
     calories_consumed : int        = Form(0),
@@ -47,17 +49,26 @@ async def scan_menu(
     if not openai_api_key:
         raise HTTPException(status_code=500, detail="OpenAI API key not configured.")
 
-    # Validate file
-    if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
-        raise HTTPException(status_code=400, detail="Invalid file type.")
-
-    image_bytes = await file.read()
-    if len(image_bytes) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image too large. Max 10MB.")
+    # Validate and normalise the photo (JPEG, PNG, WEBP, iPhone HEIC...)
+    if file.content_type and not (
+        file.content_type.startswith("image/") or file.content_type == "application/octet-stream"
+    ):
+        raise HTTPException(status_code=400, detail=NOT_AN_IMAGE)
+    try:
+        image_bytes = normalize_image(await file.read())
+    except ImageError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     image_b64          = base64.b64encode(image_bytes).decode("utf-8")
     remaining_calories = max(daily_goal - calories_consumed, 0)
     remaining_protein  = max(protein_goal - protein_consumed, 0)
+    over_by            = max(calories_consumed - daily_goal, 0)
+    if over_by > 0:
+        budget_note = f"The user is already OVER their calorie goal by {over_by} kcal today."
+    elif remaining_calories < 400:
+        budget_note = f"The user only has {remaining_calories} kcal left today, which is less than a typical restaurant dish."
+    else:
+        budget_note = "The user has a normal amount of calories left for a meal."
 
     prompt = f"""You are a nutrition expert helping a user choose the best dishes from a restaurant menu.
 
@@ -66,6 +77,7 @@ USER'S CURRENT STATUS:
 - Protein remaining today : {remaining_protein}g
 - Daily calorie goal      : {daily_goal} kcal
 - Daily protein goal      : {protein_goal}g
+- Budget situation        : {budget_note}
 
 Look at this restaurant menu and recommend the TOP 3 best dishes based on the user's remaining nutrition goals.
 Also identify 2-3 dishes to avoid and why.
@@ -89,7 +101,16 @@ Respond ONLY with a JSON object in this exact format, no extra text:
   "summary": "2 sentence summary of best strategy for this meal"
 }}
 
-If you cannot read the menu clearly, return recommendations as an empty array and explain in summary."""
+IMPORTANT RULES:
+- Restaurant menus almost never print nutrition facts. Estimate calories and macros yourself from each dish
+  name using typical restaurant portions. Never refuse or return an empty list because nutrition facts are missing.
+- Read menus in any language. Write each dish name as printed, followed by an English translation in
+  brackets if it is not in English.
+- If the user is low on calories or already over their goal, still recommend the 1 to 3 lightest, most
+  protein-dense options, and use the summary to suggest a smaller portion, sharing, or a side dish.
+  Do not tell them to skip meals.
+- Only return recommendations as an empty array if you genuinely cannot read ANY dish names, for example
+  a blank, very blurry, or non-menu image. Then explain that in the summary."""
 
     payload = {
         "model"  : GPT_MODEL,
@@ -106,7 +127,7 @@ If you cannot read the menu clearly, return recommendations as an empty array an
             }
         ],
         "max_tokens" : 600,
-        "temperature": 0.3,
+        "temperature": 0.2,
     }
 
     headers = {
