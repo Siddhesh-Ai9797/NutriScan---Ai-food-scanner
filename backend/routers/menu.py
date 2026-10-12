@@ -6,6 +6,7 @@ from typing import List, Optional
 import httpx
 import os
 import json
+import re
 import base64
 from dotenv import load_dotenv
 
@@ -24,6 +25,28 @@ class MenuDish(BaseModel):
     carbs           : float
     fat             : float
     reason          : str   # why this is recommended
+
+
+NO_MENU_SUMMARY = ("We couldn't read any dishes in this photo. Please take a clear, well lit photo "
+                   "of the menu text and try again.")
+
+
+def _norm(name: str) -> str:
+    """Lowercase name without any bracketed translation, punctuation, or extra spaces."""
+    name = re.sub(r"[\(\[].*?[\)\]]", " ", name.lower())
+    name = re.sub(r"[^\w\s]", " ", name)
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def _on_menu(name: str, readable: list) -> bool:
+    n = _norm(name)
+    if not n:
+        return False
+    for dish in readable:
+        d = _norm(dish)
+        if d and (n == d or n in d or d in n):
+            return True
+    return False
 
 
 class MenuScanResponse(BaseModel):
@@ -87,6 +110,8 @@ Every "reason", "avoid" and "summary" text is shown directly to the user, so spe
 
 Respond ONLY with a JSON object in this exact format, no extra text:
 {{
+  "is_menu": true if the image shows a readable food or drink menu, otherwise false,
+  "readable_dishes": ["every dish name you can actually read in the image, exactly as printed"],
   "recommendations": [
     {{
       "name": "dish name",
@@ -109,8 +134,10 @@ IMPORTANT RULES:
 - If the user is low on calories or already over their goal, still recommend the 1 to 3 lightest, most
   protein-dense options, and use the summary to suggest a smaller portion, sharing, or a side dish.
   Do not tell them to skip meals.
-- Only return recommendations as an empty array if you genuinely cannot read ANY dish names, for example
-  a blank, very blurry, or non-menu image. Then explain that in the summary."""
+- Every recommended or avoided dish MUST be one of "readable_dishes". Never invent, guess, or add dishes
+  that are not printed in the image.
+- If the image is blank, too blurry to read, or not a menu, set "is_menu" to false, return empty
+  "readable_dishes", "recommendations" and "avoid", and explain in the summary that no menu was readable."""
 
     payload = {
         "model"  : GPT_MODEL,
@@ -126,7 +153,7 @@ IMPORTANT RULES:
                 ],
             }
         ],
-        "max_tokens" : 600,
+        "max_tokens" : 900,
         "temperature": 0.2,
     }
 
@@ -147,10 +174,25 @@ IMPORTANT RULES:
         clean = content.replace("```json", "").replace("```", "").strip()
         data  = json.loads(clean)
 
+        readable = [d for d in data.get("readable_dishes", []) if isinstance(d, str) and d.strip()]
+        if data.get("is_menu") is False or not readable:
+            return MenuScanResponse(
+                recommendations   = [],
+                avoid             = [],
+                summary           = NO_MENU_SUMMARY,
+                remaining_calories= remaining_calories,
+            )
+
+        # Guard against invented dishes: keep only picks that match printed names.
+        recommendations = [r for r in data.get("recommendations", [])
+                           if isinstance(r, dict) and _on_menu(r.get("name", ""), readable)]
+        avoid = [a for a in data.get("avoid", [])
+                 if isinstance(a, str) and _on_menu(a.split(" - ")[0], readable)]
+
         return MenuScanResponse(
-            recommendations   = data.get("recommendations", []),
-            avoid             = data.get("avoid", []),
-            summary           = data.get("summary", ""),
+            recommendations   = recommendations,
+            avoid             = avoid,
+            summary           = data.get("summary", "") if recommendations else NO_MENU_SUMMARY,
             remaining_calories= remaining_calories,
         )
     except (json.JSONDecodeError, KeyError):

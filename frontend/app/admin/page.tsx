@@ -14,18 +14,22 @@ export default function AdminPage() {
   const router            = useRouter()
   const [stats, setStats] = useState<AdminStats | null>(null)
   const [fetching, setFetching] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!loading) {
       if (!user) { router.push("/auth"); return }
-      if (user.email !== ADMIN_EMAIL) { router.push("/"); return }
+      if (!ADMIN_EMAIL || user.email?.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) { router.push("/"); return }
     }
   }, [user, loading, router])
 
   useEffect(() => {
-    if (user?.email === ADMIN_EMAIL) {
+    if (ADMIN_EMAIL && user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
       fetchAdminStats()
         .then(setStats)
+        .catch(() => setError(
+          "Couldn't load admin data. Check that your Firestore rules give this email admin access.",
+        ))
         .finally(() => setFetching(false))
     }
   }, [user])
@@ -34,6 +38,10 @@ export default function AdminPage() {
     <div className="flex min-h-dvh items-center justify-center">
       <Loader2 className="size-8 animate-spin text-primary" />
     </div>
+  )
+
+  if (error) return (
+    <div className="mx-auto max-w-2xl px-5 py-8 text-sm text-destructive">{error}</div>
   )
 
   if (!stats) return null
