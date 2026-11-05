@@ -18,3 +18,10 @@ mlruns/
 
 # AWS
 .aws/
+# Lambda build output
+pipeline/lambda_package/
+pipeline/*.zip
+
+# OS files
+.DS_Store
+*.tsbuildinfo
