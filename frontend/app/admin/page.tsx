@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Loader2, Users, UtensilsCrossed, TrendingUp, Camera, Brain } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import { fetchAdminStats, type AdminStats } from "@/lib/admin"
+import { fetchAdminStats, type AdminStats, type AdminMetrics } from "@/lib/admin"
+import { SystemHealth } from "@/components/nutriscan/system-health"
 import { apiFetch } from "@/lib/api"
 
 export default function AdminPage() {
@@ -14,6 +15,7 @@ export default function AdminPage() {
   const [fetching, setFetching] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [photoLinks, setPhotoLinks] = useState<Record<string, string>>({})
+  const [metrics, setMetrics] = useState<AdminMetrics | null>(null)
 
   // Access is decided by the backend (ADMIN_EMAIL on Railway) and by the
   // Firestore rules, so the admin email is never shipped to browsers.
@@ -26,6 +28,10 @@ export default function AdminPage() {
       try {
         const res = await apiFetch("/admin/me")
         if (!res.ok) { if (!cancelled) router.push("/"); return }
+        // Backend monitoring is optional; the page still works without it.
+        apiFetch("/admin/metrics?hours=24")
+          .then(async (r) => { if (r.ok && !cancelled) setMetrics(await r.json()) })
+          .catch(() => {})
         const data = await fetchAdminStats()
         if (!cancelled) setStats(data)
         // Photos are private in S3; ask the backend for short-lived links.
@@ -72,6 +78,8 @@ export default function AdminPage() {
         <StatCard icon={<Users className="size-5" />} label="Unique users" value={stats.totalUsers} />
         <StatCard icon={<Camera className="size-5" />} label="Avg calories" value={`${stats.avgCalories} kcal`} />
       </div>
+
+      {metrics && <SystemHealth metrics={metrics} />}
 
       {/* Model source breakdown */}
       <div className="mb-6 rounded-3xl border border-border bg-card p-5">

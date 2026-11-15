@@ -20,6 +20,12 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cpu \
     -r requirements.txt
 
+# ── CLIP weights for the food check, baked in so startup needs no download ─
+ENV HF_HOME=/app/.hf_cache
+RUN python -c "from transformers import CLIPModel, CLIPProcessor; \
+CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
+CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
+
 # ── Copy backend code ─────────────────────────────────────────────────────
 COPY . .
 

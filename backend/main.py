@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -12,8 +13,19 @@ from services.nutrition_service import get_nutrition as _get_nutrition, NotAFood
 from services.ood_service import estimate_named_food
 from services.s3_service import download_food_photo, signed_photo_url
 from services.auth_service import require_user, require_admin, rate_limit
+from services import metrics_service
+from services.cache_service import photo_cache, name_cache
+from services.guardrail_service import food_gate, FOOD_GATE_ON, FOOD_THRESHOLD
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # CLIP loads in a background thread; scans fail open until it is ready.
+    food_gate.start_loading()
+    yield
+
 
 app = FastAPI(
+    lifespan    = lifespan,
     title       = "NutriScan AI",
     description = "AI-powered food nutrition scanner with personalized coaching.",
     version     = "2.0.0",
@@ -53,6 +65,22 @@ def health():
 def admin_me():
     """Lets the /admin page check access without exposing the admin email."""
     return {"admin": True}
+
+
+@app.get("/admin/metrics", dependencies=[Depends(require_admin)])
+def admin_metrics(hours: Optional[float] = Query(24, gt=0, le=24 * 400)):
+    """Scan routes, guardrail hits, cache hits, latency and OpenAI cost for the admin page."""
+    return {
+        "window"   : metrics_service.summary(hours),
+        "all_time" : metrics_service.summary(None),
+        "caches"   : {"photo": photo_cache.stats(), "name": name_cache.stats()},
+        "food_gate": {
+            "enabled"  : FOOD_GATE_ON,
+            "ready"    : food_gate.ready,
+            "failed"   : food_gate.failed,
+            "threshold": FOOD_THRESHOLD,
+        },
+    }
 
 
 class PhotoLinksRequest(BaseModel):

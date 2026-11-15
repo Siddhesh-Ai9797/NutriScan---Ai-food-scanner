@@ -3,7 +3,7 @@ from services.auth_service import rate_limit
 from services.image_service import normalize_image, ImageError, NOT_AN_IMAGE
 from pydantic import BaseModel
 from typing import List, Optional
-import httpx
+from services.openai_client import chat_completion, message_text
 import os
 import json
 import re
@@ -14,7 +14,6 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
 router = APIRouter()
 
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 GPT_MODEL  = "gpt-4o"
 
 
@@ -157,18 +156,11 @@ IMPORTANT RULES:
         "temperature": 0.2,
     }
 
-    headers = {
-        "Authorization": f"Bearer {openai_api_key}",
-        "Content-Type" : "application/json",
-    }
-
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        response = await client.post(OPENAI_URL, headers=headers, json=payload)
-
-    if response.status_code != 200:
+    body = await chat_completion(payload, feature="menu_scan", timeout=20.0)
+    if body is None or message_text(body) is None:
         raise HTTPException(status_code=500, detail="Menu scanner unavailable. Try again.")
 
-    content = response.json()["choices"][0]["message"]["content"].strip()
+    content = message_text(body)
 
     try:
         clean = content.replace("```json", "").replace("```", "").strip()
