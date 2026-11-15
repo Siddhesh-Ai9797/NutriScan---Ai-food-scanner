@@ -19,6 +19,8 @@ os.environ.setdefault("AWS_REGION", "us-east-1")
 os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
 os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
 os.environ["ADMIN_EMAIL"] = "admin@example.com"
+os.environ["FOOD_GATE"] = "off"
+os.environ.pop("METRICS_TABLE", None)
 
 fake_model_service = types.ModuleType("services.model_service")
 fake_model_service.classifier = MagicMock()
@@ -27,7 +29,8 @@ sys.modules["services.model_service"] = fake_model_service
 from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
-from services import auth_service  # noqa: E402
+from services import auth_service, metrics_service  # noqa: E402
+from services.cache_service import photo_cache, name_cache  # noqa: E402
 
 USER_TOKEN = "user-token"
 ADMIN_TOKEN = "admin-token"
@@ -45,6 +48,9 @@ async def _fake_verify_token(token: str) -> dict:
 def _patch_auth(monkeypatch):
     monkeypatch.setattr(auth_service, "verify_token", _fake_verify_token)
     auth_service._calls.clear()
+    photo_cache.clear()
+    name_cache.clear()
+    metrics_service.reset()
     yield
     auth_service._calls.clear()
 

@@ -8,12 +8,13 @@ per-100g values for the food as normally eaten, and first confirms the name is
 actually a food.
 """
 import json
-import os
 
-import httpx
+from services import metrics_service
+from services.cache_service import CACHE_ON, name_cache, name_key
+from services.guardrail_service import check_per_100g
+from services.openai_client import chat_completion, parse_json_reply
 
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
-GPT_MODEL  = "gpt-4o"
+GPT_MODEL = "gpt-4o"
 
 
 class NotAFoodError(ValueError):
@@ -25,7 +26,27 @@ async def get_nutrition(food_name: str) -> dict | None:
     Returns per-100g values:
         {"food", "calories", "protein", "carbs", "fat", "serving": "per 100g", "source"}
     Raises NotAFoodError for names that are not food. Returns None if GPT-4o fails.
+    Answers are cached by name, including "not a food" answers.
     """
+    key = name_key(food_name)
+    if CACHE_ON and key:
+        cached = name_cache.get(key)
+        if cached is not None:
+            metrics_service.record_event("name_cache_hit")
+            if cached == "NOT_FOOD":
+                raise NotAFoodError(food_name)
+            return cached
+
+    result = await _lookup(food_name)
+    if CACHE_ON and key and result is not None:
+        name_cache.set(key, result)
+    if result == "NOT_FOOD":
+        raise NotAFoodError(food_name)
+    return result
+
+
+async def _lookup(food_name: str) -> dict | str | None:
+    """Returns per-100g values, the string NOT_FOOD, or None on failure."""
     payload = {
         "model": GPT_MODEL,
         "messages": [{
@@ -47,29 +68,21 @@ async def get_nutrition(food_name: str) -> dict | None:
         "max_tokens" : 120,
         "temperature": 0.1,
     }
-    headers = {
-        "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
-        "Content-Type" : "application/json",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.post(OPENAI_URL, headers=headers, json=payload)
-        if response.status_code != 200:
-            return None
-        content = response.json()["choices"][0]["message"]["content"].strip()
-        data    = json.loads(content.replace("```json", "").replace("```", "").strip())
-    except (httpx.HTTPError, KeyError, IndexError, ValueError):
+    data = parse_json_reply(await chat_completion(payload, feature="nutrition_lookup", timeout=15.0))
+    if data is None:
         return None
 
     if data.get("is_food") is False:
-        raise NotAFoodError(food_name)
+        return "NOT_FOOD"
 
     try:
         calories = float(data["calories"])
     except (KeyError, TypeError, ValueError):
         return None
-    if calories < 0 or calories > 950:   # nothing exceeds pure fat (~900 kcal/100g)
+    flags = check_per_100g(calories, data.get("protein") or 0, data.get("carbs") or 0, data.get("fat") or 0)
+    if flags:
+        for rule in flags:
+            metrics_service.record_event("guardrail", rule=rule, feature="nutrition_lookup")
         return None
 
     return {

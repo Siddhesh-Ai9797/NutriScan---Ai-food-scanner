@@ -3,7 +3,7 @@ from services.auth_service import rate_limit
 from pydantic import BaseModel
 from typing import List, Optional, Literal
 from pydantic import Field
-import httpx
+from services.openai_client import chat_completion, message_text
 import os
 from dotenv import load_dotenv
 
@@ -11,7 +11,6 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "../../.env"))
 
 router = APIRouter()
 
-OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 GPT_MODEL  = "gpt-4o"
 
 
@@ -161,18 +160,11 @@ TONE:
         "temperature": 0.7,
     }
 
-    headers = {
-        "Authorization": f"Bearer {openai_api_key}",
-        "Content-Type" : "application/json",
-    }
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(OPENAI_URL, headers=headers, json=payload)
-
-    if response.status_code != 200:
+    body = await chat_completion(payload, feature="coach", timeout=15.0)
+    if body is None or message_text(body) is None:
         raise HTTPException(status_code=500, detail="AI coach unavailable. Try again.")
 
-    reply = response.json()["choices"][0]["message"]["content"].strip()
+    reply = message_text(body)
 
     suggestions = []
     if "•" in reply or "-" in reply:

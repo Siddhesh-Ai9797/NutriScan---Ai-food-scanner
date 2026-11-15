@@ -75,3 +75,28 @@ export async function fetchAdminStats(): Promise<AdminStats> {
     sourceBreakdown,
   }
 }
+// ── Backend monitoring (routes, guardrails, cache, cost) ──────────────────
+export type MetricsWindow = {
+  window_hours      : number | null
+  scans             : number
+  routes            : Record<string, number>
+  cache_hit_pct     : number | null
+  blocked_pct       : number | null
+  fast_path_pct     : number | null
+  escalated_pct     : number | null
+  error_pct         : number | null
+  guardrails        : Record<string, number>
+  latency_ms        : { p50: number | null; p95: number | null }
+  scan_cost_usd     : number
+  avg_cost_per_scan : number | null
+  total_llm_cost_usd: number
+  by_feature        : Record<string, { calls: number; cost_usd: number }>
+  name_cache_hits   : number
+}
+
+export type AdminMetrics = {
+  window   : MetricsWindow
+  all_time : MetricsWindow
+  caches   : Record<"photo" | "name", { size: number; hits: number; misses: number; hit_pct: number | null }>
+  food_gate: { enabled: boolean; ready: boolean; failed: boolean; threshold: number }
+}
